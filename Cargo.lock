@@ -3117,6 +3117,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
+name = "pml-bench"
+version = "0.2.0+26.3-26.51"
+dependencies = [
+ "criterion",
+ "pumpkin-plugin-runtime",
+ "tokio",
+ "wasmtime",
+ "wat",
+]
+
+[[package]]
 name = "png"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5819,6 +5830,28 @@ dependencies = [
  "futures",
  "tracing",
  "wasmtime",
+]
+
+[[package]]
+name = "wast"
+version = "259.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c69beba8d9da07af9a0971b559149a2ac4729895b55144de4fddbf5a02660648"
+dependencies = [
+ "bumpalo",
+ "leb128fmt",
+ "memchr",
+ "unicode-width",
+ "wasm-encoder 0.259.0",
+]
+
+[[package]]
+name = "wat"
+version = "1.259.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6eec44b0c80391b20fb7ad9ea440c72c5d382385bdf74444bb18321c425017e"
+dependencies = [
+ "wast",
 ]
 
 [[package]]
