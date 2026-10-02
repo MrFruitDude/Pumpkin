@@ -1,9 +1,11 @@
 mod chain;
+mod engine;
 mod executor;
 mod lifecycle;
 mod policy;
 mod spawn;
 
+pub use engine::engine_config;
 pub use executor::{
     LegacyGuestScope, LegacyStore, StoreDataMut, StoreExecutor, StoreFuture, StoreHandle,
 };
