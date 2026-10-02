@@ -147,6 +147,13 @@ impl JavaClient {
                             player
                                 .current_block_destroy_stage
                                 .store(progress, Ordering::Relaxed);
+                            // The client would mine a runtime block at its vanilla
+                            // carrier's speed; the server drives it instead.
+                            if pumpkin_data::runtime_registry::is_runtime_state(state.id) {
+                                player.start_server_driven_mining(position, progress);
+                            } else {
+                                player.end_server_driven_mining(position);
+                            }
                         }
                     }
                     self.update_sequence(player_action.sequence.0);
@@ -175,6 +182,7 @@ impl JavaClient {
                     }
 
                     player.mining.store(false, Ordering::Relaxed);
+                    player.end_server_driven_mining(player_action.position);
                     world.set_block_breaking(
                         entity,
                         player_action.position,
@@ -197,6 +205,15 @@ impl JavaClient {
                     // Block break & play sound
                     let entity = &player.get_entity();
                     let world = entity.world.load_full();
+
+                    // Server-driven mining (a runtime block): the player tick breaks
+                    // the block once the server's progress is complete, so a finish
+                    // from the client (which only knows the carrier) is ignored.
+                    if player.server_driven_mining.load(Ordering::Relaxed) {
+                        self.sync_block_state_to_client(&world, location);
+                        self.update_sequence(player_action.sequence.0);
+                        return;
+                    }
 
                     player.mining.store(false, Ordering::Relaxed);
                     world.set_block_breaking(entity, location, BlockBreakingProgress::Stop);

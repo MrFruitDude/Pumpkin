@@ -1307,10 +1307,12 @@ fn deserialize_item_stack_template(
         patch.push((id, None));
     }
 
-    Ok(pumpkin_data::item_stack::ItemStack::new_with_component(
-        count,
-        pumpkin_data::item::Item::from_id(item_id).unwrap_or(&pumpkin_data::item::Item::AIR),
-        patch,
+    Ok(crate::codec::item_stack_seralizer::from_java_wire_stack(
+        pumpkin_data::item_stack::ItemStack::new_with_component(
+            count,
+            pumpkin_data::item::Item::from_id(item_id).unwrap_or(&pumpkin_data::item::Item::AIR),
+            patch,
+        ),
     ))
 }
 
@@ -1318,6 +1320,8 @@ fn serialize_item_stack_template(
     stack: &pumpkin_data::item_stack::ItemStack,
     seq: &mut impl NetworkWriteExt,
 ) -> Result<(), WritingError> {
+    let wire = crate::codec::item_stack_seralizer::java_wire_stack(stack);
+    let stack = wire.as_ref();
     seq.write_var_int(&VarInt::from(stack.item.id))?;
     seq.write_var_int(&VarInt::from(stack.item_count))?;
 

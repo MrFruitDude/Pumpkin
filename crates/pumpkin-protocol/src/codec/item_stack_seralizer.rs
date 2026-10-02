@@ -3,10 +3,11 @@ use crate::codec::data_component::{DataComponentCodec, deserialize, serialize};
 use crate::ser::{NetworkReadExt, NetworkWriteExt, ReadingError, WritingError};
 use pumpkin_data::data_component::DataComponent;
 use pumpkin_data::data_component_impl::{
-    CustomDataImpl, CustomNameImpl, DataComponentImpl, ItemNameImpl,
+    CustomDataImpl, CustomNameImpl, DataComponentImpl, ItemModelImpl, ItemNameImpl,
 };
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
+use pumpkin_data::runtime_registry;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::text::TextComponent;
 use pumpkin_util::version::JavaMinecraftVersion;
@@ -15,6 +16,97 @@ use std::io::Cursor;
 
 #[derive(Clone)]
 pub struct ItemStackSerializer<'a>(pub Cow<'a, ItemStack>);
+
+/// `minecraft:custom_data` namespace that carries a runtime item through a
+/// vanilla client (spec §5.1 item remap).
+pub const PML_CUSTOM_DATA: &str = "pml";
+/// Key holding the runtime item's registry name.
+const PML_ITEM: &str = "item";
+/// Set when the wire form added `item_model`, so the reverse remap removes it.
+const PML_ADDED_MODEL: &str = "model";
+/// Set when the wire form added `item_name`, so the reverse remap removes it.
+const PML_ADDED_NAME: &str = "name";
+
+/// The form of `stack` a vanilla Java client can decode.
+///
+/// A runtime item is sent as its vanilla base item, with `item_model` (its own registry name) and a
+/// translatable `item_name` unless the stack sets them, and with its registry
+/// name under `custom_data.pml`, which creative clients echo back. Vanilla items
+/// are returned as they are.
+#[must_use]
+pub fn java_wire_stack(stack: &ItemStack) -> Cow<'_, ItemStack> {
+    if stack.item.id < Item::VANILLA_COUNT {
+        return Cow::Borrowed(stack);
+    }
+    let Some(base) = runtime_registry::java_base_item(stack.item.id) else {
+        // Not minted by the registry: never put an unknown id on the wire.
+        return Cow::Borrowed(ItemStack::EMPTY);
+    };
+    let name = stack.item.registry_key;
+    let mut wire = ItemStack::new_with_component(stack.item_count, base, stack.patch.clone());
+    let in_patch = |id| stack.patch.iter().any(|(patch_id, _)| *patch_id == id);
+    let add_model = !in_patch(DataComponent::ItemModel);
+    let add_name = !in_patch(DataComponent::ItemName);
+    if add_model {
+        wire.set_data_component(ItemModelImpl {
+            id: Cow::Borrowed(name),
+        });
+    }
+    if add_name {
+        wire.set_data_component(ItemNameImpl {
+            name: Cow::Owned(item_translation_key(name)),
+        });
+    }
+    wire.set_custom_data(PML_CUSTOM_DATA, PML_ITEM, NbtTag::String(name.into()));
+    if add_model {
+        wire.set_custom_data(PML_CUSTOM_DATA, PML_ADDED_MODEL, NbtTag::Byte(1));
+    }
+    if add_name {
+        wire.set_custom_data(PML_CUSTOM_DATA, PML_ADDED_NAME, NbtTag::Byte(1));
+    }
+    Cow::Owned(wire)
+}
+
+/// `item.<namespace>.<path>`, with `/` in the path written as `.`, like vanilla.
+fn item_translation_key(name: &str) -> String {
+    let (namespace, path) = name.split_once(':').unwrap_or(("minecraft", name));
+    format!("item.{namespace}.{}", path.replace('/', "."))
+}
+
+/// Reverses [`java_wire_stack`] for a stack a client sent.
+///
+/// A vanilla base item carrying `custom_data.pml.item` becomes that runtime item again, without the
+/// components the wire form added. A tag naming an unknown item, or one whose
+/// base item does not match the stack's, is left alone.
+#[must_use]
+pub fn from_java_wire_stack(mut stack: ItemStack) -> ItemStack {
+    let Some(NbtTag::String(name)) = stack.get_custom_data(PML_CUSTOM_DATA, PML_ITEM) else {
+        return stack;
+    };
+    let Some(item) = Item::from_registry_key(&name) else {
+        return stack;
+    };
+    if runtime_registry::java_base_item(item.id).is_none_or(|base| base.id != stack.item.id) {
+        return stack;
+    }
+    let added = |stack: &ItemStack, key| {
+        matches!(
+            stack.get_custom_data(PML_CUSTOM_DATA, key),
+            Some(NbtTag::Byte(1))
+        )
+    };
+    let drop_model = added(&stack, PML_ADDED_MODEL);
+    let drop_name = added(&stack, PML_ADDED_NAME);
+    stack.patch.retain(|(id, _)| {
+        !(drop_model && *id == DataComponent::ItemModel
+            || drop_name && *id == DataComponent::ItemName)
+    });
+    for key in [PML_ITEM, PML_ADDED_MODEL, PML_ADDED_NAME] {
+        stack.remove_custom_data(PML_CUSTOM_DATA, key);
+    }
+    stack.item = item;
+    stack
+}
 
 fn item_component_counts(stack: &ItemStack) -> (u8, u8) {
     let mut to_add = 0u8;
@@ -308,13 +400,13 @@ impl ItemStackSerializer<'_> {
             .try_into()
             .map_err(|_| ReadingError::Message("Invalid item id!".into()))?;
 
-        Ok(ItemStackSerializer(Cow::Owned(
+        Ok(ItemStackSerializer(Cow::Owned(from_java_wire_stack(
             ItemStack::new_with_component(
                 item_count.0 as u8,
                 Item::from_id(item_id_u16).unwrap_or(&Item::AIR),
                 patch,
             ),
-        )))
+        ))))
     }
 
     pub fn read_with_version(
@@ -472,7 +564,7 @@ impl ItemStackSerializer<'_> {
             ));
         }
 
-        Ok(ItemStackSerializer(Cow::Owned(stack)))
+        Ok(ItemStackSerializer(Cow::Owned(from_java_wire_stack(stack))))
     }
 
     pub fn write(&self, write: &mut impl NetworkWriteExt) -> Result<(), WritingError> {
@@ -527,13 +619,13 @@ impl ItemStackSerializer<'_> {
             .try_into()
             .map_err(|_| ReadingError::Message("Invalid item id!".into()))?;
 
-        Ok(ItemStackSerializer(Cow::Owned(
+        Ok(ItemStackSerializer(Cow::Owned(from_java_wire_stack(
             ItemStack::new_with_component(
                 item_count_u8,
                 Item::from_id(item_id_u16).unwrap_or(&Item::AIR),
                 patch,
             ),
-        )))
+        ))))
     }
 
     pub fn write_with_version(
@@ -541,7 +633,8 @@ impl ItemStackSerializer<'_> {
         write: &mut impl NetworkWriteExt,
         version: &JavaMinecraftVersion,
     ) -> Result<(), WritingError> {
-        serialize_item_stack_with_id(self.0.as_ref(), self.0.item.id, *version, write)
+        let wire = java_wire_stack(self.0.as_ref());
+        serialize_item_stack_with_id(&wire, wire.item.id, *version, write)
     }
 
     pub fn write_length_prefixed_with_version(
@@ -549,12 +642,8 @@ impl ItemStackSerializer<'_> {
         write: &mut impl NetworkWriteExt,
         version: &JavaMinecraftVersion,
     ) -> Result<(), WritingError> {
-        serialize_length_prefixed_item_stack_with_id(
-            self.0.as_ref(),
-            self.0.item.id,
-            *version,
-            write,
-        )
+        let wire = java_wire_stack(self.0.as_ref());
+        serialize_length_prefixed_item_stack_with_id(&wire, wire.item.id, *version, write)
     }
 
     pub fn write_item_cost_with_version(
@@ -562,7 +651,8 @@ impl ItemStackSerializer<'_> {
         write: &mut impl NetworkWriteExt,
         version: &JavaMinecraftVersion,
     ) -> Result<(), WritingError> {
-        serialize_item_cost_with_id(self.0.as_ref(), self.0.item.id, *version, write)
+        let wire = java_wire_stack(self.0.as_ref());
+        serialize_item_cost_with_id(&wire, wire.item.id, *version, write)
     }
 
     pub fn write_untrusted_with_version(
@@ -614,20 +704,21 @@ impl ItemStackSerializer<'_> {
                 "Can't write empty item stack template".into(),
             ));
         }
-        let (to_add, to_remove) = item_component_counts(self.0.as_ref());
-        write.put_var_int(&VarInt::from(self.0.item.id))?;
-        write.put_var_int(&VarInt::from(self.0.item_count))?;
+        let wire = java_wire_stack(self.0.as_ref());
+        let (to_add, to_remove) = item_component_counts(&wire);
+        write.put_var_int(&VarInt::from(wire.item.id))?;
+        write.put_var_int(&VarInt::from(wire.item_count))?;
         write.put_var_int(&VarInt::from(to_add))?;
         write.put_var_int(&VarInt::from(to_remove))?;
 
-        for (id, data) in &self.0.patch {
+        for (id, data) in &wire.patch {
             if let Some(data) = data {
                 write.put_var_int(&VarInt(i32::from(id.to_id())))?;
                 serialize(*id, data.as_ref(), write)?;
             }
         }
 
-        for (id, data) in &self.0.patch {
+        for (id, data) in &wire.patch {
             if data.is_none() {
                 write.put_var_int(&VarInt(i32::from(id.to_id())))?;
             }
@@ -752,6 +843,9 @@ impl OptionalItemStackHash {
 
     #[must_use]
     pub fn hash_equals(&self, other: &ItemStack) -> bool {
+        // The client hashes the stack it was sent, which is the wire form.
+        let other = java_wire_stack(other);
+        let other = other.as_ref();
         if let Some(hash) = &self.0 {
             if hash.item_id != other.item.id.into() || hash.count != other.item_count.into() {
                 return false;
