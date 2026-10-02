@@ -32,7 +32,8 @@ workspace and `Cargo.lock`) so azalea and its Bevy stack stay out of Pumpkin's d
    - how much of the offered work actually happened: block placements and breaks are checked
      against the bot's view of the world, so a server that drops actions shows up as
      unconfirmed work instead of looking cheaper.
-5. Stops the server with `stop` and writes `results/raw/<target>-<bots>bots-<ts>.json`. A run is
+5. Also records how much CPU everything else on the machine used, since other load skews every
+   metric. Stops the server with `stop` and writes `results/raw/<target>-<bots>bots-<ts>.json`. A run is
    marked invalid (and left out of reports) if any bot was offline in the window, no tick query
    answer was parsed, or samples are missing.
 
@@ -74,7 +75,15 @@ PUMPKIN_BIN=/path/to/branch/pumpkin PUMPKIN_LABEL=branch scripts/calibrate.sh re
 ```
 
 The report then lists both as separate groups. Treat a difference as real only when it is larger
-than the run-to-run spread of both groups (see the calibration notes in `results/`).
+than the run-to-run spread of both groups.
+
+## Baseline
+
+[results/baseline-2026-10-01/CALIBRATION.md](results/baseline-2026-10-01/CALIBRATION.md) has the
+first calibration on a shared Apple M4 Max. Server CPU was stable to within 2-9% run to run;
+MSPT and RSS were not (up to 33% and 28%), mainly because the host was busy with other work.
+Every result records `host_other_cpu_pct`, and `report --max-host-other-cpu-pct` can leave out
+runs that had too much company.
 
 ## Caveats
 
