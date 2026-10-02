@@ -14,18 +14,24 @@ ARG RUNTIME_IMAGE=alpine:3.24
 
 FROM ${RUST_IMAGE} AS builder
 
-# ring and zstd-sys compile C; build.rs reads the commit hash with git.
-RUN apk add --no-cache build-base musl-dev git perl
+# ring and zstd-sys compile C.
+RUN apk add --no-cache build-base musl-dev perl
 
 # rustc overflows its default stack compiling the generated pumpkin-data crate.
 ENV RUST_MIN_STACK=268435456 \
     CARGO_TERM_COLOR=always
 
+# Copy only what the Rust build reads. .git, docker/ (scripts, defaults,
+# tests) and the docs stay out of this stage, so a commit that does not touch
+# the Rust sources reuses the cached release build instead of recompiling it
+# (a cold LTO build takes well over an hour on a CI runner). The cost: without
+# .git, build.rs reports the commit hash as "unknown" in-game; the image
+# carries the revision as an OCI label instead (VCS_REF below).
 WORKDIR /build
-COPY . .
-
-# The build context's .git can belong to another UID than the build user.
-RUN git config --global --add safe.directory '*'
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY crates ./crates
+COPY tools ./tools
+COPY assets ./assets
 
 # Uses rust-toolchain.toml (latest stable) and the workspace's release profile.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
@@ -47,6 +53,11 @@ COPY --from=builder /out/pumpkin /usr/local/bin/pumpkin
 COPY docker/pumpkin.toml /etc/pumpkin/pumpkin.toml
 COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/pumpkin-entrypoint
 COPY --chmod=755 docker/backup.sh /usr/local/bin/pumpkin-backup
+
+# Set by CI (--build-arg VCS_REF=<sha>); only labels the final stage.
+ARG VCS_REF=unknown
+LABEL org.opencontainers.image.revision=${VCS_REF} \
+      org.opencontainers.image.source=https://github.com/MrFruitDude/Pumpkin
 
 USER pumpkin:pumpkin
 WORKDIR /data

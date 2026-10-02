@@ -223,5 +223,40 @@ else
     pass "BACKUP_KEEP=0 rejected"
 fi
 
+# listeners.py: the smoke test's "only TCP 25565" gate. Docker's embedded DNS
+# (127.0.0.11, random ports) is in the container's netns and is not counted;
+# anything else listening is.
+LISTENERS="$HERE/listeners.py"
+TCP_HDR='  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode'
+UDP_HDR='  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode ref pointer drops'
+proc_net() { # TCP_ROWS UDP_ROWS
+    printf '%s\n%b%s\n%b' "$TCP_HDR" "$1" "$UDP_HDR" "$2"
+}
+JAVA_ROW='   0: 00000000:63DD 00000000:0000 0A 00000000:00000000 00:00000000 00000000  2613        0 1 1\n'
+DNS_TCP='   1: 0B00007F:AA81 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 2 1\n'
+DNS_UDP='   2: 0B00007F:9D3E 00000000:0000 07 00000000:00000000 00:00000000 00000000     0        0 3 2 0 0\n'
+LOOP_TCP='   1: 0100007F:AA81 00000000:0000 0A 00000000:00000000 00:00000000 00000000  2613        0 2 1\n'
+BEDROCK_UDP='   2: 00000000:4ABC 00000000:0000 07 00000000:00000000 00:00000000 00000000  2613        0 3 2 0 0\n'
+if proc_net "$JAVA_ROW$DNS_TCP" "$DNS_UDP" | python3 "$LISTENERS" > /dev/null 2>&1; then
+    pass "listeners: Docker DNS on 127.0.0.11 not counted"
+else
+    fail "listeners: Docker DNS on 127.0.0.11 not counted"
+fi
+if proc_net "$JAVA_ROW$LOOP_TCP" "" | python3 "$LISTENERS" > /dev/null 2>&1; then
+    fail "listeners: extra TCP listener on 127.0.0.1 fails"
+else
+    pass "listeners: extra TCP listener on 127.0.0.1 fails"
+fi
+if proc_net "$JAVA_ROW" "$BEDROCK_UDP" | python3 "$LISTENERS" > /dev/null 2>&1; then
+    fail "listeners: UDP 19132 (Bedrock) fails"
+else
+    pass "listeners: UDP 19132 (Bedrock) fails"
+fi
+if proc_net "$DNS_TCP" "" | python3 "$LISTENERS" > /dev/null 2>&1; then
+    fail "listeners: missing Java 25565 fails"
+else
+    pass "listeners: missing Java 25565 fails"
+fi
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

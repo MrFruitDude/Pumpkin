@@ -9,11 +9,12 @@
 !/tools/
 !/assets/
 
-# Image defaults, entrypoint and backup scripts
+# Image defaults, entrypoint and backup scripts (not their tests)
 !/docker/
+/docker/tests/
 
-# Allow build.rs to read git commit sha
-!/.git
+# No .git: the Dockerfile keeps it out of the build so the cached release
+# build survives commits that don't touch the Rust sources.
 
 # Dependencies and toolchain
 !Cargo.lock
