@@ -109,9 +109,17 @@ pub struct CustomNameImpl {
 }
 impl CustomNameImpl {
     pub fn read_data(data: &NbtTag) -> Option<Self> {
-        data.extract_string().map(|name| Self {
-            name: TextComponent::text(name.to_string()),
-        })
+        match data {
+            NbtTag::String(name) => Some(Self {
+                name: TextComponent::text(name.to_string()),
+            }),
+            // Vanilla stores any text component here, e.g. a styled name from an
+            // anvil or a loot table: `{"text":"Bob","color":"red"}`.
+            NbtTag::Compound(_) | NbtTag::List(_) => Some(Self {
+                name: TextComponent::from_nbt(data),
+            }),
+            _ => None,
+        }
     }
 }
 impl DataComponentImpl for CustomNameImpl {
