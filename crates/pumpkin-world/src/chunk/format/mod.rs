@@ -34,6 +34,25 @@ pub mod anvil;
 pub mod linear;
 pub mod pump;
 
+/// Top-level chunk tags that [`ChunkData`] reads into its own fields and writes
+/// itself. Every other top-level tag is kept in [`ChunkData::unmodelled_nbt`].
+const MODELLED_CHUNK_TAGS: &[&str] = &[
+    "DataVersion",
+    "xPos",
+    "yPos",
+    "zPos",
+    "Status",
+    "Heightmaps",
+    "sections",
+    "block_ticks",
+    "fluid_ticks",
+    "block_entities",
+    "isLightOn",
+    "InhabitedTime",
+    "PumpkinCustomData",
+    "BukkitValues",
+];
+
 impl SingleChunkDataSerializer for ChunkData {
     #[inline]
     fn from_bytes(bytes: &Bytes, pos: Vector2<i32>) -> Result<Self, ChunkReadingError> {
@@ -128,6 +147,15 @@ fn extract_u16_array(tag: &pumpkin_nbt::tag::NbtTag) -> Option<Box<[BlockStateId
                     pumpkin_nbt::tag::NbtTag::Short(x) => BlockStateId::new_or_air(*x as u16),
                     pumpkin_nbt::tag::NbtTag::Byte(x) => BlockStateId::new_or_air(*x as u16),
                     pumpkin_nbt::tag::NbtTag::Long(x) => BlockStateId::new_or_air(*x as u16),
+                    // Since 26.3 a block without properties is stored as its bare id.
+                    pumpkin_nbt::tag::NbtTag::String(name) => {
+                        crate::generation::structure::template::BlockStateResolver::resolve_simple(
+                            &crate::generation::structure::template::PaletteEntry::new(
+                                name.to_string(),
+                            ),
+                        )
+                        .map_or(BlockStateId::AIR, |state| state.id)
+                    }
                     pumpkin_nbt::tag::NbtTag::Compound(compound) => {
                         if let Ok(entry) =
                             crate::generation::structure::template::PaletteEntry::from_nbt_compound(
@@ -428,6 +456,12 @@ impl ChunkData {
             .cloned()
             .unwrap_or_default();
 
+        let inhabited_time = root_tag.get_long("InhabitedTime").unwrap_or(0) as u64;
+        let mut unmodelled_nbt = root_tag;
+        unmodelled_nbt
+            .child_tags
+            .retain(|key, _| !MODELLED_CHUNK_TAGS.contains(&key.as_ref()));
+
         Ok(Self {
             section,
             heightmap: std::sync::Mutex::new(heightmaps),
@@ -442,8 +476,9 @@ impl ChunkData {
             light_populated: AtomicBool::new(light_correct),
             status,
             blending_data: None,
-            inhabited_time: AtomicU64::new(root_tag.get_long("InhabitedTime").unwrap_or(0) as u64),
+            inhabited_time: AtomicU64::new(inhabited_time),
             custom_data: std::sync::Mutex::new(custom_data),
+            unmodelled_nbt,
         })
     }
 
@@ -491,7 +526,7 @@ impl ChunkData {
 
         let min_section_y = (self.section.min_y >> 4) as i8;
 
-        let mut root_compound = NbtCompound::new();
+        let mut root_compound = self.unmodelled_nbt.clone();
         root_compound.put_int("DataVersion", WORLD_DATA_VERSION);
         root_compound.put_int("xPos", self.x);
         root_compound.put_int("zPos", self.z);
@@ -540,23 +575,27 @@ impl ChunkData {
                 .iter()
                 .map(|&id| {
                     let block = Block::from_state_id(id);
-                    let mut comp = NbtCompound::new();
                     let name = if block.name.starts_with("minecraft:") {
                         block.name.to_string()
                     } else {
                         format!("minecraft:{}", block.name)
                     };
-                    comp.put_string("Name", name);
-                    if let Some(props) = block.properties(id) {
-                        let prop_vec = props.to_props();
-                        if !prop_vec.is_empty() {
-                            let mut props_comp = NbtCompound::new();
-                            for (k, v) in prop_vec {
-                                props_comp.put_string(k, v.to_string());
-                            }
-                            comp.put_compound("Properties", props_comp);
-                        }
+                    let prop_vec = block
+                        .properties(id)
+                        .map(|props| props.to_props())
+                        .unwrap_or_default();
+                    // 26.3 stores a block without properties as its bare id, and
+                    // renamed Name and Properties to id and properties.
+                    if prop_vec.is_empty() {
+                        return NbtTag::String(name.into());
                     }
+                    let mut props_comp = NbtCompound::new();
+                    for (k, v) in prop_vec {
+                        props_comp.put_string(k, v.to_string());
+                    }
+                    let mut comp = NbtCompound::new();
+                    comp.put_string("id", name);
+                    comp.put_compound("properties", props_comp);
                     NbtTag::Compound(comp)
                 })
                 .collect();
@@ -1138,6 +1177,93 @@ mod tests {
             panic!("chunk without yPos and without biomes must fail");
         };
         assert!(format!("{error:?}").contains("Missing yPos"));
+    }
+
+    /// Chunk 6,-3 of a world made by the vanilla 26.3 server, with a chest, a
+    /// furnace and a sign placed by command. Raw chunk NBT, gzipped.
+    const VANILLA_26_3_CHUNK: &[u8] =
+        include_bytes!("../../../../../assets/tests/vanilla_26_3/chunk_6_-3.nbt.gz");
+
+    fn read_root(bytes: &[u8]) -> NbtCompound {
+        let mut cursor = std::io::Cursor::new(bytes);
+        let mut reader = pumpkin_nbt::deserializer::NbtReadHelperJava::new(&mut cursor);
+        pumpkin_nbt::Nbt::read(&mut reader)
+            .expect("chunk NBT parses")
+            .root_tag
+    }
+
+    fn block_entities_by_pos(root: &NbtCompound) -> FxHashMap<(i32, i32, i32), NbtCompound> {
+        root.get_list("block_entities")
+            .expect("chunk has block_entities")
+            .iter()
+            .filter_map(|tag| match tag {
+                NbtTag::Compound(nbt) => Some((
+                    (nbt.get_int("x")?, nbt.get_int("y")?, nbt.get_int("z")?),
+                    nbt.clone(),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn vanilla_26_3_chunk_survives_save_and_reload() {
+        use crate::chunk::ChunkData;
+        use pumpkin_util::math::vector2::Vector2;
+        use std::io::Read;
+
+        let mut vanilla_bytes = Vec::new();
+        flate2::read::GzDecoder::new(VANILLA_26_3_CHUNK)
+            .read_to_end(&mut vanilla_bytes)
+            .expect("fixture decompresses");
+        let vanilla = read_root(&vanilla_bytes);
+        let pos = Vector2::new(6, -3);
+
+        let loaded =
+            ChunkData::from_bytes(&vanilla_bytes.into(), pos).expect("vanilla chunk loads");
+        let block = |chunk: &ChunkData, x: i32, y: i32, z: i32| {
+            let state = chunk
+                .section
+                .get_block_absolute_y((x & 15) as usize, y, (z & 15) as usize)
+                .expect("inside the chunk");
+            Block::from_state_id(state)
+        };
+        // Vanilla stores blocks without properties as bare strings in 26.3.
+        assert_eq!(block(&loaded, 96, -64, -48), &Block::BEDROCK);
+        assert_eq!(block(&loaded, 100, 150, -40), &Block::CHEST);
+        assert_eq!(block(&loaded, 101, 150, -40), &Block::FURNACE);
+        assert_eq!(block(&loaded, 102, 150, -41), &Block::OAK_SIGN);
+
+        let saved_bytes = loaded.to_bytes().expect("chunk saves");
+        let saved = read_root(&saved_bytes);
+        let reloaded = ChunkData::from_bytes(&saved_bytes, pos).expect("saved chunk reloads");
+
+        for y in -64..320 {
+            for z in 0..16 {
+                for x in 0..16 {
+                    assert_eq!(
+                        loaded.section.get_block_absolute_y(x, y, z),
+                        reloaded.section.get_block_absolute_y(x, y, z),
+                        "block at {x},{y},{z} changed across save"
+                    );
+                }
+            }
+        }
+
+        assert_eq!(saved.get_int("DataVersion"), vanilla.get_int("DataVersion"));
+        assert_eq!(
+            block_entities_by_pos(&saved),
+            block_entities_by_pos(&vanilla),
+            "block entities changed across save"
+        );
+        // Fields Pumpkin does not model must survive the save untouched.
+        for key in ["structures", "PostProcessing", "LastUpdate"] {
+            assert_eq!(
+                saved.get(key),
+                vanilla.get(key),
+                "{key} changed across save"
+            );
+        }
     }
 
     #[test]
