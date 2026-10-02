@@ -116,7 +116,12 @@ impl Taggable for Block {
 
 impl ToResourceLocation for &'static Block {
     fn to_resource_location(&self) -> ResourceLocation {
-        format!("minecraft:{}", self.name)
+        // Vanilla names are bare paths; runtime (PML) names carry their namespace.
+        if self.name.contains(':') {
+            self.name.to_string()
+        } else {
+            format!("minecraft:{}", self.name)
+        }
     }
 }
 
@@ -322,10 +327,13 @@ impl BlockId {
     // depends on generated impl:
     // pub(crate) const BLOCK_COUNT: u16;
 
-    /// The total count of all registered blocks.
+    /// The number of vanilla blocks. Runtime (PML) blocks, if any were
+    /// registered, are numbered from here; see [`Self::registered`].
     pub const COUNT: u16 = Self::BLOCK_COUNT;
 
-    // SAFETY: There must never be a BlockId where self.0 >= BlockId::BLOCK_COUNT
+    // INVARIANT: every BlockId names a block: a vanilla one (< BLOCK_COUNT) or one
+    // minted by the runtime registry. `new` only accepts vanilla ids so it can stay
+    // `const`; ids read back from runtime data go through `registered`.
 
     #[inline]
     #[must_use]
@@ -345,9 +353,30 @@ impl BlockId {
         Self::AIR
     }
 
+    /// Accepts vanilla ids and ids of blocks the runtime registry has minted.
     #[inline]
     #[must_use]
-    pub const fn to_block(self) -> &'static Block {
+    pub fn registered(inner: u16) -> Option<Self> {
+        crate::runtime_registry::is_registered_block(inner).then_some(Self(inner))
+    }
+
+    /// Only for the runtime registry, which upholds the invariant.
+    #[inline]
+    #[must_use]
+    pub(crate) const fn from_raw(inner: u16) -> Self {
+        Self(inner)
+    }
+
+    /// Whether this is a runtime (PML) block rather than a vanilla one.
+    #[inline]
+    #[must_use]
+    pub const fn is_runtime(self) -> bool {
+        self.0 >= Self::BLOCK_COUNT
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn to_block(self) -> &'static Block {
         Block::from_id(self)
     }
 

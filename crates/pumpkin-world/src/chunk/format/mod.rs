@@ -129,18 +129,10 @@ fn extract_u16_array(tag: &pumpkin_nbt::tag::NbtTag) -> Option<Box<[BlockStateId
                     pumpkin_nbt::tag::NbtTag::Byte(x) => BlockStateId::new_or_air(*x as u16),
                     pumpkin_nbt::tag::NbtTag::Long(x) => BlockStateId::new_or_air(*x as u16),
                     pumpkin_nbt::tag::NbtTag::Compound(compound) => {
-                        if let Ok(entry) =
-                            crate::generation::structure::template::PaletteEntry::from_nbt_compound(
-                                compound,
-                            )
-                            && let Some(state) =
-                                crate::generation::structure::template::BlockStateResolver::resolve_simple(
-                                    &entry,
-                                )
-                        {
-                            return state.id;
-                        }
-                        BlockStateId::AIR
+                        crate::generation::structure::template::PaletteEntry::from_nbt_compound(
+                            compound,
+                        )
+                        .map_or(BlockStateId::AIR, |entry| palette_entry_state(&entry))
                     }
                     _ => BlockStateId::AIR,
                 })
@@ -149,6 +141,62 @@ fn extract_u16_array(tag: &pumpkin_nbt::tag::NbtTag) -> Option<Box<[BlockStateId
         }
         _ => None,
     }
+}
+
+/// Resolves a saved block palette entry.
+///
+/// A block from a non-`minecraft` namespace that is not registered (its mod was
+/// removed) becomes a `pml:missing` placeholder that remembers the entry, so
+/// saving the chunk writes it back unchanged and the block returns when its mod
+/// does. Unknown `minecraft` names keep the vanilla behaviour and load as air.
+fn palette_entry_state(
+    entry: &crate::generation::structure::template::PaletteEntry,
+) -> BlockStateId {
+    let namespaced = entry
+        .name
+        .split_once(':')
+        .is_some_and(|(namespace, _)| namespace != "minecraft");
+    if namespaced && Block::from_name(&entry.name).is_none() {
+        return pumpkin_data::runtime_registry::missing_state(&entry.name, &entry.properties);
+    }
+    crate::generation::structure::template::BlockStateResolver::resolve_simple(entry)
+        .map_or(BlockStateId::AIR, |state| state.id)
+}
+
+/// The saved form of a block state: `Name` plus `Properties` when it has any.
+/// A `pml:missing` placeholder saves the entry it was loaded from.
+fn block_state_palette_entry(id: BlockStateId) -> NbtCompound {
+    let mut comp = NbtCompound::new();
+    if let Some(missing) = pumpkin_data::runtime_registry::missing_entry(id) {
+        comp.put_string("Name", missing.name);
+        if !missing.properties.is_empty() {
+            let mut props_comp = NbtCompound::new();
+            for (k, v) in missing.properties {
+                props_comp.put_string(&k, v);
+            }
+            comp.put_compound("Properties", props_comp);
+        }
+        return comp;
+    }
+    let block = Block::from_state_id(id);
+    // Vanilla names are bare paths; runtime (PML) names carry their namespace.
+    let name = if block.name.contains(':') {
+        block.name.to_string()
+    } else {
+        format!("minecraft:{}", block.name)
+    };
+    comp.put_string("Name", name);
+    if let Some(props) = block.properties(id) {
+        let prop_vec = props.to_props();
+        if !prop_vec.is_empty() {
+            let mut props_comp = NbtCompound::new();
+            for (k, v) in prop_vec {
+                props_comp.put_string(k, v.to_string());
+            }
+            comp.put_compound("Properties", props_comp);
+        }
+    }
+    comp
 }
 
 fn extract_u8_array(tag: &pumpkin_nbt::tag::NbtTag) -> Option<Box<[u8]>> {
@@ -538,27 +586,7 @@ impl ChunkData {
             let palette_tags: Vec<NbtTag> = block_states_nbt
                 .palette
                 .iter()
-                .map(|&id| {
-                    let block = Block::from_state_id(id);
-                    let mut comp = NbtCompound::new();
-                    let name = if block.name.starts_with("minecraft:") {
-                        block.name.to_string()
-                    } else {
-                        format!("minecraft:{}", block.name)
-                    };
-                    comp.put_string("Name", name);
-                    if let Some(props) = block.properties(id) {
-                        let prop_vec = props.to_props();
-                        if !prop_vec.is_empty() {
-                            let mut props_comp = NbtCompound::new();
-                            for (k, v) in prop_vec {
-                                props_comp.put_string(k, v.to_string());
-                            }
-                            comp.put_compound("Properties", props_comp);
-                        }
-                    }
-                    NbtTag::Compound(comp)
-                })
+                .map(|&id| NbtTag::Compound(block_state_palette_entry(id)))
                 .collect();
             bs_comp.put_list("palette", palette_tags);
             section_comp.put_compound("block_states", bs_comp);

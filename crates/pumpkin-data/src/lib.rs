@@ -436,6 +436,9 @@ pub mod potion;
 pub mod potion_brewing;
 
 
+#[cfg(any(feature = "block", feature = "item"))]
+pub mod runtime_registry;
+
 #[cfg(feature = "block")]
 mod block_direction;
 #[cfg(feature = "block")]
