@@ -596,15 +596,43 @@ async fn wait_for_quiet_host(run_id: &str, wait_secs: u64, limit_pct: f64) -> f6
     }
 }
 
+/// Resolves on SIGINT or SIGTERM with the signal's name.
+async fn shutdown_signal() -> &'static str {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        let (Ok(mut term), Ok(mut int)) = (
+            signal(SignalKind::terminate()),
+            signal(SignalKind::interrupt()),
+        ) else {
+            return std::future::pending().await;
+        };
+        tokio::select! {
+            _ = term.recv() => "SIGTERM",
+            _ = int.recv() => "SIGINT",
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+        "Ctrl-C"
+    }
+}
+
 /// Forces a full GC on a Java server and reads its live heap. Run after the window closed.
 async fn java_live_heap_mb(jcmd: &Path, pid: u32) -> Option<f64> {
     let jcmd_out = |what: &'static str| async move {
-        let out = Command::new(jcmd)
-            .arg(pid.to_string())
-            .arg(what)
-            .output()
-            .await
-            .ok()?;
+        let out = tokio::time::timeout(
+            Duration::from_secs(60),
+            Command::new(jcmd)
+                .arg(pid.to_string())
+                .arg(what)
+                .kill_on_drop(true)
+                .output(),
+        )
+        .await
+        .ok()?
+        .ok()?;
         out.status
             .success()
             .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
@@ -730,13 +758,26 @@ pub async fn run(mut args: RunArgs) -> eyre::Result<PathBuf> {
         console.clone(),
     );
 
-    let result = async {
-        wait_for(Duration::from_secs(args.startup_timeout_secs), &mut server, "server ready", || console.lock().ready).await?;
+    let measured = async {
+        wait_for(
+            Duration::from_secs(args.startup_timeout_secs),
+            &mut server,
+            "server ready",
+            || console.lock().ready,
+        )
+        .await?;
         let server_ready_secs = t0.elapsed().as_secs_f64();
-        eprintln!("[{run_id}] server ready after {server_ready_secs:.1}s; connecting {} bots", args.bots);
+        eprintln!(
+            "[{run_id}] server ready after {server_ready_secs:.1}s; connecting {} bots",
+            args.bots
+        );
 
         let snapshot_path = dir.join("bots-snapshot.json");
-        let (bots_program, bots_prefix) = pin::wrap(std::env::current_exe()?.into(), Vec::new(), args.bots_cpus.as_deref());
+        let (bots_program, bots_prefix) = pin::wrap(
+            std::env::current_exe()?.into(),
+            Vec::new(),
+            args.bots_cpus.as_deref(),
+        );
         let mut bots = Command::new(bots_program)
             .args(bots_prefix)
             .arg("bots")
@@ -760,9 +801,12 @@ pub async fn run(mut args: RunArgs) -> eyre::Result<PathBuf> {
             .wrap_err("spawning bot swarm")?;
         let bots_pid = bots.id().ok_or_else(|| eyre!("bots have no pid"))?;
 
-        let join_budget = Duration::from_secs(60) + Duration::from_millis(args.join_delay_ms * args.bots as u64 * 3);
+        let join_budget = Duration::from_secs(60)
+            + Duration::from_millis(args.join_delay_ms * args.bots as u64 * 3);
         wait_for(join_budget, &mut bots, "all bots to join", || {
-            BotsSnapshot::read(&snapshot_path).is_ok_and(|s| s.joined >= args.bots || s.disconnects > 0 || s.connection_failures > 0)
+            BotsSnapshot::read(&snapshot_path).is_ok_and(|s| {
+                s.joined >= args.bots || s.disconnects > 0 || s.connection_failures > 0
+            })
         })
         .await?;
         let joined = BotsSnapshot::read(&snapshot_path)?;
@@ -780,7 +824,10 @@ pub async fn run(mut args: RunArgs) -> eyre::Result<PathBuf> {
         .await
         .wrap_err("bots spawned but the server under test did not see them all join; is another process on the port?")?;
         let bots_all_joined_secs = t0.elapsed().as_secs_f64();
-        eprintln!("[{run_id}] all bots joined after {bots_all_joined_secs:.1}s; warming up {}s", args.warmup_secs);
+        eprintln!(
+            "[{run_id}] all bots joined after {bots_all_joined_secs:.1}s; warming up {}s",
+            args.warmup_secs
+        );
         tokio::time::sleep(Duration::from_secs(args.warmup_secs)).await;
 
         let mut server_sampler = ProcSampler::new(server_pid);
@@ -808,7 +855,8 @@ pub async fn run(mut args: RunArgs) -> eyre::Result<PathBuf> {
             let host_available = host_sampler.available_mb();
             let bot = bots_sampler.sample().map(|s| s.cpu_pct);
             if let Some(mut sample) = server_sampler.sample() {
-                sample.host_other_cpu_pct = (host_busy - sample.cpu_pct - bot.unwrap_or(0.0)).max(0.0);
+                sample.host_other_cpu_pct =
+                    (host_busy - sample.cpu_pct - bot.unwrap_or(0.0)).max(0.0);
                 sample.host_available_mb = Some(host_available);
                 samples.push(sample);
             }
@@ -828,16 +876,33 @@ pub async fn run(mut args: RunArgs) -> eyre::Result<PathBuf> {
             Target::Vanilla | Target::Neoforge => {
                 let heap = java_live_heap_mb(&args.jcmd, server_pid).await;
                 if heap.is_none() {
-                    eprintln!("[{run_id}] could not read the live heap with {}", args.jcmd.display());
+                    eprintln!(
+                        "[{run_id}] could not read the live heap with {}",
+                        args.jcmd.display()
+                    );
                 }
                 heap
             }
             Target::Pumpkin => None,
         };
 
-        Ok::<_, eyre::Report>((server_ready_secs, bots_all_joined_secs, start, end, samples, bot_cpu, live_heap))
-    }
-    .await;
+        Ok::<_, eyre::Report>((
+            server_ready_secs,
+            bots_all_joined_secs,
+            start,
+            end,
+            samples,
+            bot_cpu,
+            live_heap,
+        ))
+    };
+    // A SIGTERM or Ctrl-C must not orphan the server or the bot swarm (both would keep loading
+    // the host for every later run): drop the measurement, which kills the bots, then fall
+    // through to the normal stop of the server below.
+    let result = tokio::select! {
+        r = measured => r,
+        sig = shutdown_signal() => Err(eyre!("interrupted by {sig}")),
+    };
 
     // Always try a clean stop so the next run starts on a quiet machine.
     let _ = send_console(&mut stdin, "stop").await;

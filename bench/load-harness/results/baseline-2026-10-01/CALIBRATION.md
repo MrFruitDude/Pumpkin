@@ -1,3 +1,93 @@
+# Load-harness calibration
+
+## Status, 2026-10-02: memory is comparable, MSPT is not, and this host cannot get there
+
+The fixes this baseline called for are now in the harness (see the README's "Measurement
+policy"). Changes:
+
+- **Contention gate.** A run counts only if other processes used at most 200% of one core on
+  average and were above that in at most 10% of the window's seconds (`src/gate.rs`). The report
+  applies the gate from the recorded samples and lists every rejected run. `--allow-contended`
+  keeps contended runs in the numbers, but then the verdict can never be "comparable".
+- **Quiet start.** `run --quiet-wait-secs` waits for the host to calm down before starting the
+  server. The reading is stored as `pre_run_host_busy_pct`.
+- **Memory policy.** The headline memory metric is now the process footprint: macOS
+  `phys_footprint`, Linux `Rss + Swap`. RSS is still recorded. The Java heap is fixed and
+  pre-touched (`-Xms` = `-Xmx` = 2G, `-XX:+AlwaysPreTouch`). The live heap after a full GC
+  (`jcmd`) is recorded once the window has closed.
+- **CPU pinning (Linux).** `--server-cpus` and `--bots-cpus` put the server and the bots on
+  disjoint CPUs with `taskset`. They are refused on macOS, which has no process affinity.
+- **More runs.** The report needs 5 usable runs per group (was 3), and `calibrate.sh` defaults to
+  5 repeats. The noise threshold is unchanged at 10% CV for CPU, MSPT and footprint.
+- **Clean shutdown.** A SIGTERM or Ctrl-C now stops the server and bots instead of orphaning
+  them.
+
+### Re-calibration run
+
+`results/calibration-2026-10-02/`, made with the same binaries as the baseline (Pumpkin
+`742beaf6f` release, vanilla 26.3, NeoForge 26.3.0.40-beta, Java 26.0.1). Each target ran 5 times
+with 10 bots, interleaved: 60 s warm-up, 120 s window, `QUIET_WAIT=120`. All 15 runs were valid.
+The gated verdict is in [report.md](../calibration-2026-10-02/report.md); the same runs with
+contended ones kept are in [report-ungated.md](../calibration-2026-10-02/report-ungated.md).
+
+**Every run failed the contention gate, so the gated report has 0 usable runs per group and the
+verdict is "not comparable".** The quiet-start wait never found the host quiet: just before
+starting, other processes were using 629% to 1029% of a core. During the windows they used 636%
+to 951%, against a limit of 200%. Swap was 23.3 of 24.6 GB used at the end. The harness did what
+it should, refusing to call these numbers comparable. The CVs below are therefore from
+contended runs (`report-ungated.md`):
+
+| Metric | NeoForge | Pumpkin | Vanilla | Threshold | Met? |
+|:--|--:|--:|--:|--:|:--|
+| Footprint mean CV | 1.3% | 8.7% | 0.3% | 10% | Yes, even on this busy host |
+| RSS mean CV (old metric) | 10.2% | 38.5% | 15.4% | 10% | No |
+| MSPT mean CV | 37.8% | 44.6% | 42.7% | 10% | No |
+| CPU mean CV | 19.3% | 8.9% | 16.1% | 10% | No (Java) |
+
+- **Memory: fixed.** Footprint holds steady where RSS did not. Pumpkin's RSS ranged from 92 to
+  265 MB across runs, but its footprint only from 239 to 292 MB. At 10 bots the footprint is
+  Pumpkin 259 ± 23 MB, vanilla 2450 ± 7 MB, NeoForge 2520 ± 33 MB, with the Java servers at a
+  pre-touched 2G heap. The live heap after GC varies too much to use as a headline metric
+  (vanilla 218 to 895 MB, CV 71%; NeoForge CV 33%), so it is reported for context only. It stays
+  out of the verdict.
+- **MSPT: not fixed on this host.** MSPT spread is worse than the baseline's 4.4% to 33%. Other
+  host CPU does not explain it either. The slowest pair of Java runs (vanilla 10.8 ms and
+  NeoForge 8.7 ms, against about 4 to 5 ms otherwise) ran while other load was at its lowest of
+  the sweep (636% and 639%). In those runs the server's own CPU time rose too (32% and 30% of a
+  core, against 21 to 25%), so it spent more cycles on the same work. That fits the server
+  landing on the M4 Max's slower efficiency cores, or a lower clock, under contention. This was
+  not verified (it needs `powermetrics`, which needs root). Either way, a whole-host CPU number
+  cannot detect it, so on macOS the gate is necessary but not sufficient.
+- **Run-procedure problem (mine).** During repeat 4 I killed the NeoForge harness process by
+  mistake, which was before the shutdown fix. Its NeoForge server (idle, 2G pre-touched heap) and
+  its bot swarm kept running for about 22 minutes. That overlapped Pumpkin repeat 4, vanilla and
+  NeoForge repeat 5, and the start of Pumpkin repeat 5. Their load is included in those runs'
+  "Other host CPU", and none of the runs is an outlier. NeoForge repeat 4 has no result; the 5th
+  NeoForge run was made afterwards with the same settings. The harness now stops its children on
+  SIGTERM, so this cannot happen again.
+
+### What would make MSPT comparable
+
+Loosening the gate or the 10% threshold is not one of the options; on this host it would mean
+measuring the host.
+
+1. **Run on a quiet, dedicated machine.** Use a Linux box (or a self-hosted runner, since GitHub's
+   shared runners are noisy VMs) with `SERVER_CPUS`/`BOTS_CPUS` set, those CPUs isolated
+   (`isolcpus=` or a cgroup cpuset for everything else), and the `performance` frequency
+   governor. That is the setup the gate and pinning are built for.
+2. **If it has to be this Mac,** run the sweep while nothing else is running: no other agent
+   sessions, Gradle daemons, Minecraft clients, or the `bun` process that sat at 100% in the
+   baseline. Use `QUIET_WAIT=300` (the default) so runs wait for that. The gate then shows
+   whether the host really was quiet. Even then, Apple Silicon's mix of fast and slow cores is
+   not under the harness's control, so confirm the MSPT CV on a quiet run before trusting it.
+3. **Then re-run 5 × {10, 50} bots** and check `report.md` gives "comparable" with the default
+   thresholds.
+
+Until then, quote memory (footprint) differences between Pumpkin and the Java servers, and CPU
+differences only above about 20%. Do not quote MSPT differences.
+
+---
+
 # Baseline calibration, 2026-10-01
 
 `scripts/calibrate.sh` with defaults: vanilla 26.3, NeoForge 26.3.0.40-beta and Pumpkin

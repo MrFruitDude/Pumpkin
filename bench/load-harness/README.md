@@ -23,7 +23,8 @@ workspace and `Cargo.lock`) so azalea and its Bevy stack stay out of Pumpkin's d
    - places a stone block 3 blocks ahead every 5 s and breaks it 0.75 s later,
    - sends a chat message every 10 s.
 4. Waits `--warmup-secs` after the last bot joined, then measures for `--measure-secs`:
-   - server CPU (% of one core) and RSS, sampled every second from the server process,
+   - server CPU (% of one core), footprint and RSS, sampled every second from the server
+     process (see [Memory](#memory)),
    - the server's own tick times: `tick query` is sent to the console every 5 s and its average
      and P50/P95/P99 (over the last 100 ticks) are parsed from the output. Vanilla, NeoForge and
      Pumpkin all implement it with the same text,
@@ -39,8 +40,52 @@ workspace and `Cargo.lock`) so azalea and its Bevy stack stay out of Pumpkin's d
 
 `mc-load-harness report <dirs or files>` groups runs by target, label and bot count and writes
 `<out>.json` and `<out>.md` with mean, sample stddev, CV, min and max for each metric. CPU, MSPT
-and RSS are the headline metrics: a group whose headline CV is above `--max-cv-pct` (10% by
-default) or that has fewer than 3 runs is flagged as too noisy to compare.
+and footprint are the headline metrics: a group whose headline CV is above `--max-cv-pct` (10%
+by default), that has fewer than `--min-runs` usable runs (5), or whose footprint was not
+measured is flagged as too noisy to compare. Runs that fail the contention gate are left out.
+
+## Measurement policy
+
+### Contention gate
+
+Other load on the host changes which cores the server gets and how long its ticks take: the
+2026-10-01 baseline saw MSPT vary by up to 33% between repeats with 7 to 9 other cores busy. Each
+run records once a second how much CPU everything except the server and the bots used. The
+report counts a run only if that was at most `--max-host-other-cpu-pct` (200% of one core) on
+average **and** above it in at most `--max-over-fraction` (10%) of the window's seconds, so a
+burst the mean hides also rejects the run. Rejected runs are listed with the reason.
+`--allow-contended` keeps them in the numbers to look at a busy host's data, but then the
+verdict is never "comparable". `run --quiet-wait-secs N` waits up to N seconds for the host to
+drop below the limit before starting; `scripts/calibrate.sh` waits 300 s by default.
+
+The limits are fixed in `src/gate.rs`. Do not raise them to make a busy host pass: a run on a
+busy host measures the host.
+
+### CPU pinning
+
+On Linux, `--server-cpus` and `--bots-cpus` (`taskset -c` lists, e.g. `2-5` and `6-9`) put the
+server and the bots on disjoint CPUs. For the strongest isolation also keep everything else off
+those CPUs (`isolcpus=` on the kernel command line, or a cgroup cpuset for the rest of the
+system), and disable frequency scaling. macOS has no CPU affinity for processes, so the options
+are refused there; on macOS the contention gate is the only protection.
+
+### Memory
+
+The headline memory metric is the process *footprint*: everything the process holds, whether
+the OS currently keeps it in RAM or not (macOS `phys_footprint` from `proc_pid_rusage`, the
+"Memory" column in Activity Monitor; Linux `Rss + Swap` from `/proc/<pid>/smaps_rollup`). RSS is
+still recorded but is not comparable on a host under memory pressure, because the OS compresses
+or swaps the server's idle pages and RSS falls while the server still holds the memory (Pumpkin
+255 to 103 MB inside one constant-load window in the baseline, with host swap 97% full).
+
+The Java servers run with a fixed, pre-touched heap (`-Xms` = `-Xmx` = `--java-heap`, plus
+`-XX:+AlwaysPreTouch`; `--java-pretouch false` turns that off). Their footprint is therefore
+the heap the operator provisions plus the JVM's non-heap memory, and does not depend on how far
+the collector happened to spread into the heap during the window. What the server actually
+needs is recorded separately: after the window closes the harness forces a full GC with `jcmd`
+and records the live heap (`java_live_heap_mb`). Compare Pumpkin's footprint with the Java
+footprint for "memory to provision at this heap size", and with the live heap plus non-heap
+for "memory the Java server needs".
 
 ## Running it
 
@@ -57,7 +102,7 @@ scripts/fetch-servers.sh                       # vanilla 26.3 jar + NeoForge 26.
 target/release/mc-load-harness run --target pumpkin --server ../../target/release/pumpkin \
     --label "pumpkin $(git rev-parse --short HEAD)" --bots 10
 
-# the full calibration sweep (3 repeats x 10/50 bots x 3 targets, about 75 minutes)
+# the full calibration sweep (5 repeats x 10/50 bots x 3 targets, about 2.5 hours on a quiet host)
 scripts/calibrate.sh results/my-sweep
 ```
 
@@ -77,13 +122,11 @@ PUMPKIN_BIN=/path/to/branch/pumpkin PUMPKIN_LABEL=branch scripts/calibrate.sh re
 The report then lists both as separate groups. Treat a difference as real only when it is larger
 than the run-to-run spread of both groups.
 
-## Baseline
+## Calibration
 
 [results/baseline-2026-10-01/CALIBRATION.md](results/baseline-2026-10-01/CALIBRATION.md) has the
-first calibration on a shared Apple M4 Max. Server CPU was stable to within 2-9% run to run;
-MSPT and RSS were not (up to 33% and 28%), mainly because the host was busy with other work.
-Every result records `host_other_cpu_pct`, and `report --max-host-other-cpu-pct` can leave out
-runs that had too much company.
+first calibration on a shared Apple M4 Max and the follow-up run after the fixes above
+(`results/calibration-2026-10-02/`). Read it before quoting numbers from this harness.
 
 ## Caveats
 
@@ -93,8 +136,8 @@ runs that had too much company.
   measures each server under the same offered load; it does not prove the work is equivalent.
 - "MSPT" is each server's own measurement of its main tick. Pumpkin does networking, chunk
   generation and lighting off the tick on other threads, so its MSPT covers less of its work
-  than vanilla's. CPU time and RSS are the like-for-like numbers.
-- JVM RSS depends heavily on the heap settings; all Java runs use the same `--java-heap`.
+  than vanilla's. CPU time and footprint are the like-for-like numbers.
+- Java footprint depends on the heap settings; all Java runs use the same `--java-heap`.
 - The bots run on the same machine and take CPU too (`bot_cpu_pct_mean` in the results).
 - The client is azalea from its `26.3` branch at a pinned commit; it has no crates.io release
   for 26.3 yet.
