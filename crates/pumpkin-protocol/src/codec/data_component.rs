@@ -319,12 +319,9 @@ impl DataComponentCodec<Self> for ItemModelImpl {
 
 impl DataComponentCodec<Self> for CustomNameImpl {
     fn serialize(&self, seq: &mut impl NetworkWriteExt) -> Result<(), WritingError> {
-        let mut bytes = Vec::new();
-        NbtTag::String(self.name.clone().get_text().into_boxed_str())
-            .serialize(&mut NbtWriteHelperJava::new(&mut bytes))
-            .map_err(|e| WritingError::Message(e.to_string()))?;
-        seq.write_slice(&bytes)?;
-        Ok(())
+        // ComponentSerialization.STREAM_CODEC: the full text component as NBT, so
+        // a styled name keeps its style.
+        seq.write_slice(&self.name.encode_for_version(&JavaMinecraftVersion::V_26_3))
     }
 
     fn deserialize(seq: &mut impl NetworkReadExt) -> Result<Self, ReadingError> {
@@ -1382,51 +1379,281 @@ impl DataComponentCodec<Self> for BundleContentsImpl {
     }
 }
 
-macro_rules! codec_string_variant {
-    ($struct_name:ident) => {
+fn variant_error(component: &str, value: &str) -> WritingError {
+    WritingError::Message(format!("unknown {component} value '{value}'"))
+}
+
+fn bare_name(name: &str) -> &str {
+    name.strip_prefix("minecraft:").unwrap_or(name)
+}
+
+/// Entity variant components whose vanilla stream codec is
+/// `ByteBufCodecs.holderRegistry` of a synced data-driven registry: the plain
+/// network id of the entry, in the order the registry was sent to the client.
+macro_rules! codec_registry_variant {
+    ($struct_name:ident, $registry:ty, $component:literal) => {
         impl DataComponentCodec<Self> for $struct_name {
             fn serialize(&self, seq: &mut impl NetworkWriteExt) -> Result<(), WritingError> {
-                seq.write_string(&self.value)
+                let entry = <$registry>::from_name(&self.value)
+                    .ok_or_else(|| variant_error($component, &self.value))?;
+                seq.write_var_int(&VarInt(entry.id() as i32))
             }
             fn deserialize(seq: &mut impl NetworkReadExt) -> Result<Self, ReadingError> {
-                let value = seq.get_str()?;
+                let id = seq.get_var_int()?.0;
+                let entry = usize::try_from(id)
+                    .ok()
+                    .and_then(|id| <$registry>::all().get(id))
+                    .ok_or_else(|| {
+                        ReadingError::Message(format!("unknown {} id {id}", $component))
+                    })?;
                 Ok(Self {
-                    value: Cow::Owned(value.into()),
+                    value: Cow::Owned(format!("minecraft:{}", entry.to_name())),
                 })
             }
         }
     };
 }
 
-codec_string_variant!(VillagerVariantImpl);
-codec_string_variant!(WolfVariantImpl);
-codec_string_variant!(WolfSoundVariantImpl);
-codec_string_variant!(WolfCollarImpl);
-codec_string_variant!(FoxVariantImpl);
-codec_string_variant!(SalmonSizeImpl);
-codec_string_variant!(ParrotVariantImpl);
-codec_string_variant!(TropicalFishPatternImpl);
-codec_string_variant!(TropicalFishBaseColorImpl);
-codec_string_variant!(TropicalFishPatternColorImpl);
-codec_string_variant!(MooshroomVariantImpl);
-codec_string_variant!(RabbitVariantImpl);
-codec_string_variant!(PigVariantImpl);
-codec_string_variant!(PigSoundVariantImpl);
-codec_string_variant!(CowVariantImpl);
-codec_string_variant!(CowSoundVariantImpl);
-codec_string_variant!(ChickenVariantImpl);
-codec_string_variant!(ChickenSoundVariantImpl);
-codec_string_variant!(ZombieNautilusVariantImpl);
-codec_string_variant!(FrogVariantImpl);
-codec_string_variant!(HorseVariantImpl);
-codec_string_variant!(PaintingVariantImpl);
-codec_string_variant!(LlamaVariantImpl);
-codec_string_variant!(AxolotlVariantImpl);
-codec_string_variant!(CatVariantImpl);
-codec_string_variant!(CatSoundVariantImpl);
-codec_string_variant!(CatCollarImpl);
-codec_string_variant!(SheepColorImpl);
-codec_string_variant!(ShulkerColorImpl);
+/// Entity variant components whose vanilla stream codec is
+/// `ByteBufCodecs.idMapper` over a Java enum: the enum's own numeric id.
+macro_rules! codec_enum_variant {
+    ($struct_name:ident, $component:literal, [$(($name:literal, $id:literal)),+ $(,)?]) => {
+        impl DataComponentCodec<Self> for $struct_name {
+            fn serialize(&self, seq: &mut impl NetworkWriteExt) -> Result<(), WritingError> {
+                let id: i32 = match bare_name(&self.value) {
+                    $($name => $id,)+
+                    _ => return Err(variant_error($component, &self.value)),
+                };
+                seq.write_var_int(&VarInt(id))
+            }
+            fn deserialize(seq: &mut impl NetworkReadExt) -> Result<Self, ReadingError> {
+                let name = match seq.get_var_int()?.0 {
+                    $($id => $name,)+
+                    id => {
+                        return Err(ReadingError::Message(format!(
+                            "unknown {} id {id}",
+                            $component
+                        )));
+                    }
+                };
+                Ok(Self {
+                    value: Cow::Borrowed(name),
+                })
+            }
+        }
+    };
+}
+
+/// Components stored as a dye color (`DyeColor.STREAM_CODEC`, the dye id).
+macro_rules! codec_dye_variant {
+    ($struct_name:ident, $component:literal) => {
+        impl DataComponentCodec<Self> for $struct_name {
+            fn serialize(&self, seq: &mut impl NetworkWriteExt) -> Result<(), WritingError> {
+                let color = pumpkin_data::dye_color::DyeColor::by_name(bare_name(&self.value))
+                    .ok_or_else(|| variant_error($component, &self.value))?;
+                seq.write_var_int(&VarInt(i32::from(color.id())))
+            }
+            fn deserialize(seq: &mut impl NetworkReadExt) -> Result<Self, ReadingError> {
+                let id = seq.get_var_int()?.0;
+                let color = u8::try_from(id)
+                    .ok()
+                    .and_then(pumpkin_data::dye_color::DyeColor::by_id)
+                    .ok_or_else(|| {
+                        ReadingError::Message(format!("unknown {} id {id}", $component))
+                    })?;
+                Ok(Self {
+                    value: Cow::Borrowed(color.name()),
+                })
+            }
+        }
+    };
+}
+
+// Vanilla: VillagerType.STREAM_CODEC is `holderRegistry` of the built-in
+// villager type registry, so the plain registry id.
+impl DataComponentCodec<Self> for VillagerVariantImpl {
+    fn serialize(&self, seq: &mut impl NetworkWriteExt) -> Result<(), WritingError> {
+        let villager_type = pumpkin_data::villager::VillagerType::from_name(&self.value)
+            .ok_or_else(|| variant_error("villager/variant", &self.value))?;
+        seq.write_var_int(&VarInt(villager_type as i32))
+    }
+    fn deserialize(seq: &mut impl NetworkReadExt) -> Result<Self, ReadingError> {
+        let id = seq.get_var_int()?.0;
+        let villager_type = pumpkin_data::villager::VillagerType::from_i32(id)
+            .ok_or_else(|| ReadingError::Message(format!("unknown villager/variant id {id}")))?;
+        Ok(Self {
+            value: Cow::Owned(format!("minecraft:{}", villager_type.to_name())),
+        })
+    }
+}
+codec_registry_variant!(
+    WolfVariantImpl,
+    pumpkin_data::wolf_variant::WolfVariant,
+    "wolf/variant"
+);
+codec_registry_variant!(
+    WolfSoundVariantImpl,
+    pumpkin_data::wolf_sound_variant::WolfSoundVariant,
+    "wolf/sound_variant"
+);
+codec_dye_variant!(WolfCollarImpl, "wolf/collar");
+codec_enum_variant!(FoxVariantImpl, "fox/variant", [("red", 0), ("snow", 1)]);
+codec_enum_variant!(
+    SalmonSizeImpl,
+    "salmon/size",
+    [("small", 0), ("medium", 1), ("large", 2)]
+);
+codec_enum_variant!(
+    ParrotVariantImpl,
+    "parrot/variant",
+    [
+        ("red_blue", 0),
+        ("blue", 1),
+        ("green", 2),
+        ("yellow_blue", 3),
+        ("gray", 4),
+    ]
+);
+// TropicalFish.Pattern packs `base.id | index << 8`.
+codec_enum_variant!(
+    TropicalFishPatternImpl,
+    "tropical_fish/pattern",
+    [
+        ("kob", 0),
+        ("sunstreak", 256),
+        ("snooper", 512),
+        ("dasher", 768),
+        ("brinely", 1024),
+        ("spotty", 1280),
+        ("flopper", 1),
+        ("stripey", 257),
+        ("glitter", 513),
+        ("blockfish", 769),
+        ("betty", 1025),
+        ("clayfish", 1281),
+    ]
+);
+codec_dye_variant!(TropicalFishBaseColorImpl, "tropical_fish/base_color");
+codec_dye_variant!(TropicalFishPatternColorImpl, "tropical_fish/pattern_color");
+codec_enum_variant!(
+    MooshroomVariantImpl,
+    "mooshroom/variant",
+    [("red", 0), ("brown", 1)]
+);
+codec_enum_variant!(
+    RabbitVariantImpl,
+    "rabbit/variant",
+    [
+        ("brown", 0),
+        ("white", 1),
+        ("black", 2),
+        ("white_splotched", 3),
+        ("gold", 4),
+        ("salt", 5),
+        ("evil", 99),
+    ]
+);
+codec_registry_variant!(
+    PigVariantImpl,
+    pumpkin_data::pig_variant::PigVariant,
+    "pig/variant"
+);
+codec_registry_variant!(
+    PigSoundVariantImpl,
+    pumpkin_data::pig_sound_variant::PigSoundVariant,
+    "pig/sound_variant"
+);
+codec_registry_variant!(
+    CowVariantImpl,
+    pumpkin_data::cow_variant::CowVariant,
+    "cow/variant"
+);
+codec_registry_variant!(
+    CowSoundVariantImpl,
+    pumpkin_data::cow_sound_variant::CowSoundVariant,
+    "cow/sound_variant"
+);
+codec_registry_variant!(
+    ChickenVariantImpl,
+    pumpkin_data::chicken_variant::ChickenVariant,
+    "chicken/variant"
+);
+codec_registry_variant!(
+    ChickenSoundVariantImpl,
+    pumpkin_data::chicken_sound_variant::ChickenSoundVariant,
+    "chicken/sound_variant"
+);
+codec_registry_variant!(
+    ZombieNautilusVariantImpl,
+    pumpkin_data::zombie_nautilus_variant::ZombieNautilusVariant,
+    "zombie_nautilus/variant"
+);
+codec_registry_variant!(
+    FrogVariantImpl,
+    pumpkin_data::frog_variant::FrogVariant,
+    "frog/variant"
+);
+codec_enum_variant!(
+    HorseVariantImpl,
+    "horse/variant",
+    [
+        ("white", 0),
+        ("creamy", 1),
+        ("chestnut", 2),
+        ("brown", 3),
+        ("black", 4),
+        ("gray", 5),
+        ("dark_brown", 6),
+    ]
+);
+codec_enum_variant!(
+    LlamaVariantImpl,
+    "llama/variant",
+    [("creamy", 0), ("white", 1), ("brown", 2), ("gray", 3)]
+);
+codec_enum_variant!(
+    AxolotlVariantImpl,
+    "axolotl/variant",
+    [
+        ("lucy", 0),
+        ("wild", 1),
+        ("gold", 2),
+        ("cyan", 3),
+        ("blue", 4),
+    ]
+);
+codec_registry_variant!(
+    CatVariantImpl,
+    pumpkin_data::cat_variant::CatVariant,
+    "cat/variant"
+);
+codec_registry_variant!(
+    CatSoundVariantImpl,
+    pumpkin_data::cat_sound_variant::CatSoundVariant,
+    "cat/sound_variant"
+);
+codec_dye_variant!(CatCollarImpl, "cat/collar");
+codec_dye_variant!(SheepColorImpl, "sheep/color");
+codec_dye_variant!(ShulkerColorImpl, "shulker/color");
+
+// Vanilla: PaintingVariant.STREAM_CODEC is a holder (registry id + 1, or 0 and an
+// inline variant).
+impl DataComponentCodec<Self> for PaintingVariantImpl {
+    fn serialize(&self, seq: &mut impl NetworkWriteExt) -> Result<(), WritingError> {
+        let variant = pumpkin_data::painting_variant::PaintingVariant::from_name(&self.value)
+            .ok_or_else(|| variant_error("painting/variant", &self.value))?;
+        write_holder_reference(variant.id(), seq)
+    }
+    fn deserialize(seq: &mut impl NetworkReadExt) -> Result<Self, ReadingError> {
+        let id = read_holder_reference(seq)?;
+        let variant = pumpkin_data::painting_variant::PaintingVariant::all()
+            .get(id as usize)
+            .ok_or_else(|| ReadingError::Message(format!("unknown painting/variant id {id}")))?;
+        Ok(Self {
+            value: Cow::Owned(format!("minecraft:{}", variant.to_name())),
+        })
+    }
+}
 
 impl DataComponentCodec<Self> for MaxDamageImpl {
     fn serialize(&self, seq: &mut impl NetworkWriteExt) -> Result<(), WritingError> {
@@ -2190,13 +2417,16 @@ impl DataComponentCodec<Self> for DyeImpl {
     }
 }
 
+// Not network-synchronized in vanilla: sent as the NBT of its persistent codec
+// (`ByteBufCodecs.fromCodecWithRegistries`).
 impl DataComponentCodec<Self> for MapDecorationsImpl {
-    fn serialize(&self, _seq: &mut impl NetworkWriteExt) -> Result<(), WritingError> {
-        Ok(())
+    fn serialize(&self, seq: &mut impl NetworkWriteExt) -> Result<(), WritingError> {
+        seq.write_nbt(self.to_nbt())
     }
 
-    fn deserialize(_seq: &mut impl NetworkReadExt) -> Result<Self, ReadingError> {
-        Ok(Self)
+    fn deserialize(seq: &mut impl NetworkReadExt) -> Result<Self, ReadingError> {
+        let tag = seq.get_nbt_with_version(&JavaMinecraftVersion::V_26_3)?;
+        Ok(Self { decorations: tag })
     }
 }
 
@@ -2218,22 +2448,38 @@ impl DataComponentCodec<Self> for MapPostProcessingImpl {
 
 impl DataComponentCodec<Self> for ChargedProjectilesImpl {
     fn serialize(&self, seq: &mut impl NetworkWriteExt) -> Result<(), WritingError> {
-        seq.write_var_int(&VarInt::from(self.projectiles.len() as i32))?;
-        for _ in &self.projectiles {
-            seq.write_var_int(&VarInt(0))?;
-            seq.write_var_int(&VarInt(0))?;
-            seq.write_var_int(&VarInt(0))?;
-            seq.write_var_int(&VarInt(0))?;
+        // Vanilla: ItemStackTemplate.STREAM_CODEC.apply(list(1024)).
+        let stacks = self
+            .projectiles
+            .iter()
+            .map(|nbt| {
+                pumpkin_data::item_stack::ItemStack::read_item_stack(nbt)
+                    .filter(|stack| !stack.is_empty())
+                    .ok_or_else(|| {
+                        WritingError::Message("charged projectile is not a valid item stack".into())
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        seq.write_var_int(&VarInt::from(stacks.len() as i32))?;
+        for stack in &stacks {
+            serialize_item_stack_template(stack, seq)?;
         }
         Ok(())
     }
 
     fn deserialize(seq: &mut impl NetworkReadExt) -> Result<Self, ReadingError> {
         let len = seq.get_var_int()?.0 as usize;
+        if len > 1024 {
+            return Err(ReadingError::Message(format!(
+                "{len} charged projectiles exceed the maximum of 1024"
+            )));
+        }
         let mut projectiles = Vec::with_capacity(len);
         for _ in 0..len {
-            let _ = deserialize_item_stack_template(seq)?;
-            projectiles.push(pumpkin_nbt::compound::NbtCompound::new());
+            let stack = deserialize_item_stack_template(seq)?;
+            let mut nbt = pumpkin_nbt::compound::NbtCompound::new();
+            stack.write_item_stack(&mut nbt);
+            projectiles.push(nbt);
         }
         Ok(Self { projectiles })
     }
@@ -2318,29 +2564,73 @@ impl DataComponentCodec<Self> for WrittenBookContentImpl {
     }
 }
 
+/// Writes a `ByteBufCodecs.holder` reference to a synced registry entry: the
+/// entry's network id plus one (zero would announce an inline value).
+fn write_holder_reference(id: u32, seq: &mut impl NetworkWriteExt) -> Result<(), WritingError> {
+    let id = i32::try_from(id)
+        .map_err(|_| WritingError::Message(format!("registry id {id} does not fit in VarInt")))?;
+    seq.write_var_int(&VarInt(id + 1))
+}
+
+/// Reads a `ByteBufCodecs.holder` reference written by [`write_holder_reference`].
+/// Inline (direct) values are not supported.
+fn read_holder_reference(seq: &mut impl NetworkReadExt) -> Result<u32, ReadingError> {
+    let raw = seq.get_var_int()?.0;
+    if raw <= 0 {
+        return Err(ReadingError::Message(
+            "inline registry values are not supported".into(),
+        ));
+    }
+    Ok((raw - 1) as u32)
+}
+
+fn holder_name<'a>(tag: &'a NbtTag, what: &str) -> Result<&'a str, WritingError> {
+    tag.extract_string()
+        .ok_or_else(|| WritingError::Message(format!("inline {what} values are not supported")))
+}
+
 impl DataComponentCodec<Self> for TrimImpl {
     fn serialize(&self, seq: &mut impl NetworkWriteExt) -> Result<(), WritingError> {
-        seq.write_var_int(&VarInt(0))?;
-        seq.write_var_int(&VarInt(0))
+        let material_name = holder_name(&self.material, "trim material")?;
+        let material = pumpkin_data::trim_material::TrimMaterial::from_name(material_name)
+            .ok_or_else(|| {
+                WritingError::Message(format!("unknown trim material '{material_name}'"))
+            })?;
+        let pattern_name = holder_name(&self.pattern, "trim pattern")?;
+        let pattern =
+            pumpkin_data::trim_pattern::TrimPattern::from_name(pattern_name).ok_or_else(|| {
+                WritingError::Message(format!("unknown trim pattern '{pattern_name}'"))
+            })?;
+        write_holder_reference(material.id(), seq)?;
+        write_holder_reference(pattern.id(), seq)
     }
 
     fn deserialize(seq: &mut impl NetworkReadExt) -> Result<Self, ReadingError> {
-        let _material = seq.get_var_int()?;
-        let _pattern = seq.get_var_int()?;
+        let material_id = read_holder_reference(seq)?;
+        let pattern_id = read_holder_reference(seq)?;
+        let material = pumpkin_data::trim_material::TrimMaterial::all()
+            .get(material_id as usize)
+            .ok_or_else(|| ReadingError::Message(format!("unknown trim material {material_id}")))?;
+        let pattern = pumpkin_data::trim_pattern::TrimPattern::all()
+            .get(pattern_id as usize)
+            .ok_or_else(|| ReadingError::Message(format!("unknown trim pattern {pattern_id}")))?;
         Ok(Self {
-            material: NbtTag::String("minecraft:quartz".into()),
-            pattern: NbtTag::String("minecraft:coast".into()),
+            material: NbtTag::String(format!("minecraft:{}", material.to_name()).into()),
+            pattern: NbtTag::String(format!("minecraft:{}", pattern.to_name()).into()),
         })
     }
 }
 
+// Not network-synchronized in vanilla: sent as the NBT of its persistent codec
+// (`ByteBufCodecs.fromCodecWithRegistries`).
 impl DataComponentCodec<Self> for DebugStickStateImpl {
-    fn serialize(&self, _seq: &mut impl NetworkWriteExt) -> Result<(), WritingError> {
-        Ok(())
+    fn serialize(&self, seq: &mut impl NetworkWriteExt) -> Result<(), WritingError> {
+        seq.write_nbt(self.to_nbt())
     }
 
-    fn deserialize(_seq: &mut impl NetworkReadExt) -> Result<Self, ReadingError> {
-        Ok(Self)
+    fn deserialize(seq: &mut impl NetworkReadExt) -> Result<Self, ReadingError> {
+        let tag = seq.get_nbt_with_version(&JavaMinecraftVersion::V_26_3)?;
+        Ok(Self { state: tag })
     }
 }
 
@@ -2379,12 +2669,14 @@ impl DataComponentCodec<Self> for EntityDataImpl {
 
 impl DataComponentCodec<Self> for BucketEntityDataImpl {
     fn serialize(&self, seq: &mut impl NetworkWriteExt) -> Result<(), WritingError> {
-        seq.write_nbt(NbtTag::Compound(pumpkin_nbt::compound::NbtCompound::new()))
+        seq.write_nbt(NbtTag::Compound(self.to_nbt()))
     }
 
     fn deserialize(seq: &mut impl NetworkReadExt) -> Result<Self, ReadingError> {
-        let _nbt = seq.get_nbt_with_version(&JavaMinecraftVersion::V_26_2)?;
-        Ok(Self)
+        let nbt = seq.get_nbt_with_version(&JavaMinecraftVersion::V_26_2)?;
+        Ok(Self {
+            nbt: nbt.and_then(|tag| tag.extract_compound().cloned()),
+        })
     }
 }
 
@@ -2469,13 +2761,16 @@ impl DataComponentCodec<Self> for ProvidesBannerPatternsImpl {
     }
 }
 
+// Not network-synchronized in vanilla: sent as the NBT of its persistent codec
+// (`ByteBufCodecs.fromCodecWithRegistries`).
 impl DataComponentCodec<Self> for RecipesImpl {
-    fn serialize(&self, _seq: &mut impl NetworkWriteExt) -> Result<(), WritingError> {
-        Ok(())
+    fn serialize(&self, seq: &mut impl NetworkWriteExt) -> Result<(), WritingError> {
+        seq.write_nbt(self.to_nbt())
     }
 
-    fn deserialize(_seq: &mut impl NetworkReadExt) -> Result<Self, ReadingError> {
-        Ok(Self)
+    fn deserialize(seq: &mut impl NetworkReadExt) -> Result<Self, ReadingError> {
+        let tag = seq.get_nbt_with_version(&JavaMinecraftVersion::V_26_3)?;
+        Ok(Self { recipes: tag })
     }
 }
 
@@ -2662,7 +2957,12 @@ impl DataComponentCodec<Self> for BannerPatternsImpl {
     fn serialize(&self, seq: &mut impl NetworkWriteExt) -> Result<(), WritingError> {
         seq.write_var_int(&VarInt::from(self.layers.len() as i32))?;
         for layer in &self.layers {
-            seq.write_var_int(&VarInt(0))?;
+            // Vanilla: BannerPattern.STREAM_CODEC is a holder (registry id + 1).
+            let pattern = pumpkin_data::banner_pattern::BannerPattern::from_name(&layer.pattern)
+                .ok_or_else(|| {
+                    WritingError::Message(format!("unknown banner pattern '{}'", layer.pattern))
+                })?;
+            write_holder_reference(pattern.id(), seq)?;
             seq.write_var_int(&VarInt::from(layer.color.id() as i32))?;
         }
         Ok(())
@@ -2670,13 +2970,18 @@ impl DataComponentCodec<Self> for BannerPatternsImpl {
 
     fn deserialize(seq: &mut impl NetworkReadExt) -> Result<Self, ReadingError> {
         let len = seq.get_var_int()?.0 as usize;
-        let mut layers = Vec::with_capacity(len);
+        let mut layers = Vec::with_capacity(len.min(64));
         for _ in 0..len {
-            let _pattern = seq.get_var_int()?.0;
+            let pattern_id = read_holder_reference(seq)?;
+            let pattern = pumpkin_data::banner_pattern::BannerPattern::all()
+                .get(pattern_id as usize)
+                .ok_or_else(|| {
+                    ReadingError::Message(format!("unknown banner pattern {pattern_id}"))
+                })?;
             let color_id = seq.get_var_int()?.0 as u8;
             let color = pumpkin_data::dye_color::DyeColor::by_id(color_id).unwrap_or_default();
             layers.push(pumpkin_data::data_component_impl::BannerPatternLayer {
-                pattern: String::new(),
+                pattern: format!("minecraft:{}", pattern.to_name()),
                 color,
             });
         }

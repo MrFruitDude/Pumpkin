@@ -85,6 +85,40 @@ impl UserCache {
         self.add_internal(uuid, name);
     }
 
+    /// Names of every cached profile, expired or not.
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.profiles_by_uuid
+            .values()
+            .map(|entry| entry.name.as_str())
+    }
+
+    /// Re-keys every entry for which `remap(name, uuid)` returns a different
+    /// UUID, keeping its expiry date. Returns how many entries changed.
+    /// An entry is left alone when the new UUID already has its own entry.
+    pub fn remap_uuids(&mut self, mut remap: impl FnMut(&str, Uuid) -> Option<Uuid>) -> usize {
+        let mut changes = Vec::new();
+        for entry in self.profiles_by_uuid.values() {
+            if let Some(new) = remap(&entry.name, entry.uuid)
+                && new != entry.uuid
+                && !self.profiles_by_uuid.contains_key(&new)
+            {
+                changes.push((entry.uuid, new));
+            }
+        }
+        for (old, new) in &changes {
+            if let Some(mut entry) = self.profiles_by_uuid.remove(old) {
+                entry.uuid = *new;
+                self.profiles_by_name
+                    .insert(entry.name.to_ascii_lowercase(), entry.clone());
+                self.profiles_by_uuid.insert(*new, entry);
+            }
+        }
+        if !changes.is_empty() {
+            self.save();
+        }
+        changes.len()
+    }
+
     pub fn get_by_name(&mut self, name: &str) -> Option<UserCacheEntry> {
         let lowercase_name = name.to_ascii_lowercase();
         let mut profile = self.profiles_by_name.get(&lowercase_name).cloned();

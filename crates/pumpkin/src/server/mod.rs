@@ -241,6 +241,9 @@ impl Server {
             gamemode: basic_config.default_gamemode,
         });
         let players_dir = world_path.join("players");
+        if !advanced_config.networking.java.online_mode {
+            crate::data::offline_uuid_migration::migrate(&players_dir, &vanilla_data);
+        }
         let player_data_storage = ServerPlayerData::new(
             players_dir.join("data"),
             Duration::from_secs(advanced_config.player_data.save_player_cron_interval),
