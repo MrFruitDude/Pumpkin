@@ -1,0 +1,135 @@
+# plain survival items
+64 oak_log
+32 cobblestone
+crafting_table
+16 bread
+wooden_pickaxe
+stone_sword
+iron_pickaxe
+diamond_sword
+bow
+64 arrow
+shield
+16 torch
+furnace
+white_bed
+water_bucket
+flint_and_steel
+16 cooked_beef
+leather_helmet
+iron_chestplate
+golden_apple
+compass
+clock
+map
+fishing_rod
+elytra
+totem_of_undying
+ender_pearl
+# damaged tools (normal survival wear)
+wooden_pickaxe[damage=3]
+stone_axe[damage=40]
+iron_pickaxe[damage=100]
+diamond_sword[damage=1]
+bow[damage=12]
+shield[damage=5]
+fishing_rod[damage=2]
+iron_boots[damage=10]
+flint_and_steel[damage=1]
+shears[damage=7]
+# enchanting
+diamond_sword[enchantments={sharpness:3,unbreaking:2}]
+iron_pickaxe[enchantments={efficiency:2},damage=4]
+bow[enchantments={power:1}]
+diamond_chestplate[enchantments={protection:4}]
+fishing_rod[enchantments={luck_of_the_sea:1,lure:2}]
+enchanted_book[stored_enchantments={mending:1}]
+enchanted_book[stored_enchantments={sharpness:5,looting:3}]
+golden_sword[enchantments={sharpness:1},repair_cost=1]
+diamond_pickaxe[enchantments={fortune:3},repair_cost=3,custom_name="Picky"]
+# names
+diamond_sword[custom_name="Excalibur"]
+name_tag[custom_name={"text":"Bob","color":"red"}]
+# potions
+potion[potion_contents={potion:"minecraft:healing"}]
+potion[potion_contents={potion:"minecraft:water"}]
+potion[potion_contents={potion:"minecraft:long_night_vision"}]
+splash_potion[potion_contents={potion:"minecraft:strong_harming"}]
+lingering_potion[potion_contents={potion:"minecraft:poison"}]
+8 tipped_arrow[potion_contents={potion:"minecraft:slowness"}]
+potion[potion_contents={custom_color:16711680,custom_effects:[{id:"minecraft:speed",amplifier:1,duration:600}]}]
+suspicious_stew[suspicious_stew_effects=[{id:"minecraft:night_vision",duration:100}]]
+# loot / structure items
+ominous_bottle[ominous_bottle_amplifier=2]
+goat_horn[instrument="minecraft:ponder_goat_horn"]
+music_disc_cat
+filled_map[map_id=0]
+filled_map[map_id=3,map_decorations={a:{type:"minecraft:mansion",x:10.0,z:20.0,rotation:180.0}}]
+writable_book[writable_book_content={pages:["draft"]}]
+leather_chestplate[dyed_color=16711680]
+iron_helmet[trim={material:"minecraft:gold",pattern:"minecraft:coast"}]
+firework_rocket[fireworks={flight_duration:2,explosions:[{shape:"large_ball",colors:[16711680]}]}]
+firework_star[firework_explosion={shape:"star",colors:[255],has_trail:true}]
+crossbow[charged_projectiles=[{id:"minecraft:arrow",count:1}]]
+bundle[bundle_contents=[{id:"minecraft:dirt",count:4}]]
+shulker_box[container=[{slot:0,item:{id:"minecraft:diamond",count:3}}]]
+player_head[profile={name:"Notch"}]
+white_banner[banner_patterns=[{pattern:"minecraft:creeper",color:"lime"}]]
+compass[lodestone_tracker={target:{pos:[1,64,2],dimension:"minecraft:overworld"},tracked:true}]
+debug_stick
+knowledge_book[recipes=["minecraft:stone"]]
+cod_bucket[bucket_entity_data={}]
+axolotl_bucket
+tropical_fish_bucket
+egg
+blue_egg
+brown_egg
+painting[painting/variant="minecraft:kebab"]
+zombie_spawn_egg
+saddle
+iron_horse_armor
+wolf_armor
+bee_nest[bees=[]]
+armor_stand
+item_frame
+mace
+trident[damage=3]
+wooden_spear
+iron_spear[damage=2]
+netherite_sword[enchantments={sharpness:5,fire_aspect:2,looting:3,mending:1,unbreaking:3}]
+# entity variant components (buckets, paintings, spawn eggs)
+axolotl_bucket[axolotl/variant="blue",bucket_entity_data={Age:0}]
+axolotl_bucket[axolotl/variant="gold"]
+tropical_fish_bucket[tropical_fish/pattern="clayfish",tropical_fish/base_color="red",tropical_fish/pattern_color="white"]
+tropical_fish_bucket[tropical_fish/pattern="sunstreak"]
+salmon_bucket[salmon/size="large"]
+painting[painting/variant="minecraft:alban"]
+painting[painting/variant="minecraft:wither"]
+wolf_spawn_egg[wolf/variant="minecraft:snowy",wolf/collar="blue",wolf/sound_variant="minecraft:angry"]
+cat_spawn_egg[cat/variant="minecraft:tabby",cat/collar="red",cat/sound_variant="minecraft:classic"]
+pig_spawn_egg[pig/variant="minecraft:cold",pig/sound_variant="minecraft:big"]
+cow_spawn_egg[cow/variant="minecraft:warm",cow/sound_variant="minecraft:moody"]
+chicken_spawn_egg[chicken/variant="minecraft:cold",chicken/sound_variant="minecraft:picky"]
+frog_spawn_egg[frog/variant="minecraft:warm"]
+zombie_nautilus_spawn_egg[zombie_nautilus/variant="minecraft:warm"]
+villager_spawn_egg[villager/variant="minecraft:taiga"]
+fox_spawn_egg[fox/variant="snow"]
+parrot_spawn_egg[parrot/variant="gray"]
+mooshroom_spawn_egg[mooshroom/variant="brown"]
+rabbit_spawn_egg[rabbit/variant="evil"]
+horse_spawn_egg[horse/variant="dark_brown"]
+llama_spawn_egg[llama/variant="gray"]
+sheep_spawn_egg[sheep/color="pink"]
+shulker_spawn_egg[shulker/color="black"]
+# more survival items
+shield[banner_patterns=[{pattern:"minecraft:stripe_top",color:"red"},{pattern:"minecraft:globe",color:"blue"}],base_color="white"]
+black_banner[banner_patterns=[{pattern:"minecraft:skull",color:"white"}]]
+crossbow[charged_projectiles=[{id:"minecraft:arrow",count:1},{id:"minecraft:arrow",count:1},{id:"minecraft:arrow",count:1}],damage=4]
+filled_map[map_id=7]
+leather_boots[dyed_color=255,trim={material:"minecraft:redstone",pattern:"minecraft:silence"}]
+netherite_chestplate[trim={material:"minecraft:netherite",pattern:"minecraft:flow"},enchantments={protection:4}]
+diamond_helmet[trim={material:"minecraft:amethyst",pattern:"minecraft:bolt"},damage=30]
+firework_rocket[fireworks={flight_duration:3,explosions:[{shape:"burst",colors:[1,2],fade_colors:[3],has_twinkle:true}]}]
+potion[potion_contents={potion:"minecraft:swiftness"},custom_name="Speedy"]
+golden_carrot[custom_name={"text":"Carrot","italic":false}]
+debug_stick[debug_stick_state={"minecraft:oak_stairs":"facing"}]
