@@ -1,0 +1,39 @@
+# Default configuration shipped with the Pumpkin Docker image.
+#
+# The container entrypoint copies this file to /data/pumpkin.toml the first
+# time it starts. On that first start Pumpkin fills in every setting not listed
+# here with its own built-in default and rewrites the file, so it ends up
+# holding the full configuration.
+#
+# Only the settings below differ from Pumpkin's own defaults. Every one of
+# them is checked by crates/pumpkin-config/tests/docker_defaults.rs.
+
+# Anonymous usage heartbeat to pumpkinmc.org: OFF. The entrypoint also forces
+# this on every start from PUMPKIN_TELEMETRY (default "false").
+[telemetry]
+enabled = false
+
+# Bedrock Edition (UDP 19132 + NetherNet): OFF. Forced on every start from
+# PUMPKIN_BEDROCK (default "false").
+[networking.bedrock]
+enabled = false
+
+[networking.bedrock.nethernet]
+enabled = false
+
+# Java Edition is the only listener on 25565.
+[networking.java]
+enabled = true
+address = "0.0.0.0:25565"
+
+# Query is off; if you turn it on it uses 25566/udp so it never shares 25565.
+[networking.query]
+enabled = false
+address = "0.0.0.0:25566"
+
+[networking.rcon]
+enabled = false
+address = "0.0.0.0:25575"
+
+[networking.lan_broadcast]
+enabled = false

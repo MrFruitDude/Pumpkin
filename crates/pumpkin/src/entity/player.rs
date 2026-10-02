@@ -360,7 +360,7 @@ fn read_root_vehicle(nbt: &NbtCompound) -> Option<Uuid> {
     ))
 }
 
-pub const DATA_VERSION: i32 = 4903; // 26.2
+pub const DATA_VERSION: i32 = pumpkin_world::world_info::MAXIMUM_SUPPORTED_WORLD_DATA_VERSION;
 
 /// Food exhaustion applied for every block a player mines.
 ///
@@ -8084,6 +8084,55 @@ mod tests {
         assert_eq!(bedrock_inventory_slot(44), Some(8));
         assert_eq!(bedrock_inventory_slot(8), None);
         assert_eq!(bedrock_inventory_slot(45), None);
+    }
+
+    /// The inventory of a player saved by the vanilla 26.3 server has to come back
+    /// unchanged when Pumpkin loads it and writes it out again.
+    #[test]
+    fn vanilla_26_3_player_inventory_survives_save_and_reload() {
+        use crate::entity::NBTStorage;
+        use pumpkin_inventory::{
+            build_equipment_slots, entity_equipment::EntityEquipment,
+            player::player_inventory::PlayerInventory,
+        };
+        use std::sync::{Arc, Mutex};
+
+        let vanilla = pumpkin_nbt::nbt_compress::read_gzip_compound_tag(std::io::Cursor::new(
+            include_bytes!("../../../../assets/tests/vanilla_26_3/player.dat"),
+        ))
+        .unwrap();
+        let inventory = PlayerInventory::new(
+            Arc::new(Mutex::new(EntityEquipment::new())),
+            Arc::new(build_equipment_slots()),
+        );
+        inventory.read_nbt_non_mut(&vanilla);
+        let mut saved = NbtCompound::new();
+        inventory.write_nbt(&mut saved);
+
+        let items = |nbt: &NbtCompound| -> Vec<NbtCompound> {
+            nbt.get_list("Inventory")
+                .unwrap()
+                .iter()
+                .filter_map(|tag| tag.extract_compound().cloned())
+                .collect()
+        };
+        let vanilla_items = items(&vanilla);
+        let saved_items = items(&saved);
+        assert_eq!(saved_items.len(), vanilla_items.len());
+        for vanilla_item in &vanilla_items {
+            let slot = vanilla_item.get_byte("Slot");
+            let saved_item = saved_items
+                .iter()
+                .find(|item| item.get_byte("Slot") == slot)
+                .unwrap_or_else(|| panic!("slot {slot:?} lost"));
+            for (key, value) in &vanilla_item.child_tags {
+                assert_eq!(
+                    saved_item.get(key),
+                    Some(value),
+                    "slot {slot:?} changed {key}"
+                );
+            }
+        }
     }
 
     #[test]

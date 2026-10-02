@@ -1,33 +1,77 @@
+# One-command Pumpkin server:   docker compose up -d
+#
+# Full guide: docs/hosting.md. Every PUMPKIN_* / BACKUP_* value below can be
+# set in a .env file next to this file or in your shell; the value after ":-"
+# is the default.
 services:
   pumpkin:
-    # Make sure to change the tag to the pumpkin version you want to use.
-    # https://github.com/Pumpkin-MC/Pumpkin/pkgs/container/pumpkin/versions?filters%5Bversion_type%5D=tagged
-    #image: ghcr.io/pumpkin-mc/pumpkin:master
     build: .
+    image: pumpkin-server:local
     ports:
-      - "25565:25565"
-      - "19132:19132/udp"
+      # Java Edition only. Change the left side to use another host port.
+      - "${PUMPKIN_HOST_PORT:-25565}:25565/tcp"
+    environment:
+      # Off unless you opt in. Applied on every start.
+      PUMPKIN_TELEMETRY: "${PUMPKIN_TELEMETRY:-false}"
+      PUMPKIN_BEDROCK: "${PUMPKIN_BEDROCK:-false}"
+      # Optional overrides; empty means "keep what pumpkin.toml says".
+      PUMPKIN_MOTD: "${PUMPKIN_MOTD:-}"
+      PUMPKIN_MAX_PLAYERS: "${PUMPKIN_MAX_PLAYERS:-}"
+      PUMPKIN_ONLINE_MODE: "${PUMPKIN_ONLINE_MODE:-}"
+      PUMPKIN_VIEW_DISTANCE: "${PUMPKIN_VIEW_DISTANCE:-}"
+      PUMPKIN_SIMULATION_DISTANCE: "${PUMPKIN_SIMULATION_DISTANCE:-}"
+      PUMPKIN_SEED: "${PUMPKIN_SEED:-}"
+      PUMPKIN_DIFFICULTY: "${PUMPKIN_DIFFICULTY:-}"
+      PUMPKIN_GAMEMODE: "${PUMPKIN_GAMEMODE:-}"
+      PUMPKIN_HARDCORE: "${PUMPKIN_HARDCORE:-}"
+      PUMPKIN_WHITELIST: "${PUMPKIN_WHITELIST:-}"
+      PUMPKIN_LEVEL_NAME: "${PUMPKIN_LEVEL_NAME:-}"
+      # World import from ./import: if-missing (default) or replace.
+      PUMPKIN_IMPORT_MODE: "${PUMPKIN_IMPORT_MODE:-if-missing}"
+      TZ: "${TZ:-UTC}"
     volumes:
-      # Pumpkin runs as UID/GID 2613. On Linux hosts, make sure the data
-      # directory has the correct ownership before starting the server:
-      #   mkdir -p ./data
-      #   sudo chown -R 2613:2613 ./data
-      - ./data:/pumpkin
-      # As an alternative, Docker can manage the storage volume. Existing
-      # installations must migrate ./data before switching to avoid creating
-      # a new, empty world:
-      # - pumpkin-data:/pumpkin
-      # Use the following mount if you want to make your config immutable.
-      # - ./pumpkin.toml:/pumpkin/pumpkin.toml:ro
-    security_opt:
-      - no-new-privileges:true
-    restart: unless-stopped
+      # Config (pumpkin.toml), worlds, logs, ops/whitelist, plugins.
+      - "${PUMPKIN_DATA:-pumpkin-data}:/data"
+      # Drop an existing vanilla world folder in here to import it.
+      - ./import:/import:ro
     stdin_open: true
     tty: true
+    restart: unless-stopped
+    # Pumpkin saves the world on SIGTERM; give it time.
+    stop_grace_period: 60s
+    read_only: true
+    tmpfs:
+      - /tmp
     cap_drop:
       - ALL
-    read_only: true
+    security_opt:
+      - no-new-privileges:true
 
-# Uncomment this section when using the pumpkin-data volume above.
-# volumes:
-#   pumpkin-data:
+  backup:
+    # Same image as the server (built once, then reused from the build cache).
+    build: .
+    image: pumpkin-server:local
+    depends_on:
+      - pumpkin
+    entrypoint: ["/usr/local/bin/pumpkin-backup"]
+    command: ["loop"]
+    environment:
+      BACKUP_INTERVAL_SECS: "${BACKUP_INTERVAL_SECS:-86400}"
+      BACKUP_KEEP: "${BACKUP_KEEP:-7}"
+      PUMPKIN_LEVEL_NAME: "${PUMPKIN_LEVEL_NAME:-}"
+      TZ: "${TZ:-UTC}"
+    volumes:
+      - "${PUMPKIN_DATA:-pumpkin-data}:/data"
+      - "${PUMPKIN_BACKUPS:-pumpkin-backups}:/backups"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  pumpkin-data:
+  pumpkin-backups:

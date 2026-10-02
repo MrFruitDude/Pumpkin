@@ -1,0 +1,116 @@
+# Proves the one-command Docker hosting setup (Dockerfile, docker-compose.yml,
+# docker/): builds the image from this repository's source and smoke-tests it
+# with `docker compose up -d`. See docs/hosting.md.
+name: Docker hosting
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # rustc overflows its default stack compiling the generated pumpkin-data crate.
+  RUST_MIN_STACK: "268435456"
+  IMAGE: pumpkin-server:local
+
+jobs:
+  scripts:
+    name: Hosting scripts and shipped defaults
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+      - name: Entrypoint and backup tests (dash)
+        run: sh docker/tests/test-scripts.sh
+      - name: Entrypoint and backup tests (busybox, as in the image)
+        run: >-
+          docker run --rm -v "$PWD:/src:ro" -w /src alpine:3.24
+          sh -c 'apk add --no-cache python3 > /dev/null && sh docker/tests/test-scripts.sh'
+      - name: docker compose config is valid
+        run: docker compose config --quiet
+      - name: Shipped config keeps telemetry and Bedrock off
+        run: |
+          rustup show active-toolchain
+          cargo test -p pumpkin-config --test docker_defaults
+
+  image:
+    name: Build image
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: ${{ env.IMAGE }}
+          build-args: VCS_REF=${{ github.event.pull_request.head.sha || github.sha }}
+          cache-from: type=gha,scope=docker-hosting
+          cache-to: type=gha,mode=max,scope=docker-hosting
+      - name: Inspect
+        run: |
+          docker image ls "$IMAGE"
+          user="$(docker image inspect --format '{{.Config.User}}' "$IMAGE")"
+          echo "image user: $user"
+          [ "$user" = "pumpkin:pumpkin" ] || { echo "image must run as non-root pumpkin"; exit 1; }
+          docker run --rm --entrypoint /usr/local/bin/pumpkin-backup "$IMAGE" list
+      - name: Save image
+        run: docker save "$IMAGE" | gzip -1 > pumpkin-image.tar.gz
+      - uses: actions/upload-artifact@v7
+        with:
+          name: pumpkin-image
+          path: pumpkin-image.tar.gz
+          retention-days: 3
+
+  smoke:
+    name: Smoke test (fresh world, backup, restore)
+    needs: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+      - uses: actions/download-artifact@v8
+        with:
+          name: pumpkin-image
+      - run: gunzip -c pumpkin-image.tar.gz | docker load
+      - run: docker/tests/smoke.sh fresh
+
+  smoke-vanilla-import:
+    name: Smoke test (import a vanilla 26.3 world)
+    needs: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+      - name: Generate a world with the vanilla 26.3 server
+        run: python3 docker/tests/make_vanilla_world.py "$RUNNER_TEMP/vanilla-world" --version 26.3
+      - uses: actions/download-artifact@v8
+        with:
+          name: pumpkin-image
+      - run: gunzip -c pumpkin-image.tar.gz | docker load
+      - run: docker/tests/smoke.sh vanilla-import "$RUNNER_TEMP/vanilla-world"
