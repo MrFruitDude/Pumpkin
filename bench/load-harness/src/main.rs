@@ -1,6 +1,9 @@
 //! Bot load-test harness for Minecraft Java servers. See README.md.
 
 mod bots;
+mod gate;
+mod mem;
+mod pin;
 mod report;
 mod run;
 mod snapshot;
@@ -18,7 +21,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Cmd {
     /// Start a server, load it with bots, measure, and write a result JSON.
-    Run(run::RunArgs),
+    Run(Box<run::RunArgs>),
     /// Run only the bot swarm against an already running server (used by `run`).
     Bots(bots::BotsArgs),
     /// Aggregate result JSONs into a calibration/comparison report.
@@ -29,7 +32,7 @@ enum Cmd {
 async fn main() -> eyre::Result<()> {
     match Cli::parse().command {
         Cmd::Run(args) => {
-            let out = run::run(args).await?;
+            let out = run::run(*args).await?;
             println!("{}", out.display());
         }
         Cmd::Bots(args) => bots::run(args).await?,

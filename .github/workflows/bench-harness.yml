@@ -89,6 +89,9 @@ jobs:
               problems.append("no chat round trips")
           if not run["samples"]:
               problems.append("no process samples")
+          # Checks the Linux footprint path (/proc/<pid>/smaps_rollup) end to end.
+          if not run["summary"].get("footprint_mb_mean"):
+              problems.append("no process footprint measured")
           if problems:
               sys.exit("smoke run failed: " + "; ".join(problems))
           EOF

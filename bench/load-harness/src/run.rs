@@ -3,6 +3,7 @@
 //! and write a JSON result.
 
 use std::{
+    ffi::OsString,
     path::{Path, PathBuf},
     process::Stdio,
     sync::Arc,
@@ -20,6 +21,7 @@ use tokio::{
 };
 
 use crate::{
+    gate, mem, pin,
     snapshot::{BotsSnapshot, now_ms},
     stats::{mean, percentile},
 };
@@ -70,8 +72,31 @@ pub struct RunArgs {
     /// Java heap for -Xms and -Xmx (vanilla and NeoForge).
     #[arg(long, default_value = "2G")]
     pub java_heap: String,
+    /// Touch the whole Java heap at start-up (`-XX:+AlwaysPreTouch`), so the Java servers'
+    /// footprint is the configured heap plus non-heap memory instead of depending on how far
+    /// the collector happened to spread into the heap. What the server actually needs is
+    /// recorded separately as the live heap after a full GC.
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    pub java_pretouch: bool,
     #[arg(long, default_value = "java")]
     pub java: PathBuf,
+    /// `jcmd` used after the window to read the Java servers' live heap.
+    #[arg(long, default_value = "jcmd")]
+    pub jcmd: PathBuf,
+    /// Pin the server to these CPUs (`taskset -c` list, Linux only), e.g. `2-5`.
+    #[arg(long)]
+    pub server_cpus: Option<String>,
+    /// Pin the bot swarm to these CPUs (Linux only); must not overlap `--server-cpus`.
+    #[arg(long)]
+    pub bots_cpus: Option<String>,
+    /// Before starting the server, wait up to this long for other load on the host to drop
+    /// below `--max-host-other-cpu-pct`. The run starts either way; the report's contention
+    /// gate decides whether it counts.
+    #[arg(long, default_value_t = 0)]
+    pub quiet_wait_secs: u64,
+    /// Other host load (% of one core) the pre-start wait and the run's own verdict line use.
+    #[arg(long, default_value_t = gate::DEFAULT_MAX_HOST_OTHER_CPU_PCT)]
+    pub max_host_other_cpu_pct: f64,
     /// Delay between bot joins, in milliseconds.
     #[arg(long, default_value_t = 250)]
     pub join_delay_ms: u64,
@@ -102,9 +127,15 @@ pub struct ProcSample {
     /// CPU used since the previous sample, as a percentage of one core.
     pub cpu_pct: f64,
     pub rss_mb: f64,
+    /// Everything the process holds, resident or not (see `mem`). `None` if not measurable.
+    #[serde(default)]
+    pub footprint_mb: Option<f64>,
     /// CPU used by everything except the server and the bots, % of one core.
     #[serde(default)]
     pub host_other_cpu_pct: f64,
+    /// Memory the host could still hand out at this sample.
+    #[serde(default)]
+    pub host_available_mb: Option<f64>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -121,6 +152,15 @@ pub struct Summary {
     pub cpu_pct_p95: f64,
     pub rss_mb_mean: f64,
     pub rss_mb_peak: f64,
+    #[serde(default)]
+    pub footprint_mb_mean: Option<f64>,
+    #[serde(default)]
+    pub footprint_mb_peak: Option<f64>,
+    /// Java only: used heap after a full GC, taken after the window closed.
+    #[serde(default)]
+    pub java_live_heap_mb: Option<f64>,
+    #[serde(default)]
+    pub host_available_mb_min: Option<f64>,
     pub bot_cpu_pct_mean: f64,
     #[serde(default)]
     pub host_other_cpu_pct_mean: f64,
@@ -152,6 +192,9 @@ pub struct RunResult {
     pub params: RunParams,
     pub server_ready_secs: f64,
     pub bots_all_joined_secs: f64,
+    /// Other host load (% of one core) just before the server started.
+    #[serde(default)]
+    pub pre_run_host_busy_pct: Option<f64>,
     pub work: WindowWork,
     pub summary: Summary,
     /// Empty when the run is usable; otherwise why it must not be compared.
@@ -170,6 +213,12 @@ pub struct RunParams {
     pub simulation_distance: u8,
     pub java_heap: String,
     pub join_delay_ms: u64,
+    #[serde(default)]
+    pub java_pretouch: bool,
+    #[serde(default)]
+    pub server_cpus: Option<String>,
+    #[serde(default)]
+    pub bots_cpus: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -385,29 +434,40 @@ fn neoforge_args_file(install: &Path) -> eyre::Result<String> {
     }
 }
 
-fn server_command(args: &RunArgs, dir: &Path) -> eyre::Result<Command> {
-    let heap = [
-        format!("-Xms{}", args.java_heap),
-        format!("-Xmx{}", args.java_heap),
+/// JVM options shared by both Java targets: a fixed heap (`-Xms` = `-Xmx`), optionally
+/// pre-touched, so the heap the server runs with never changes during a run.
+fn java_heap_args(args: &RunArgs) -> Vec<OsString> {
+    let mut v: Vec<OsString> = vec![
+        format!("-Xms{}", args.java_heap).into(),
+        format!("-Xmx{}", args.java_heap).into(),
     ];
-    let mut cmd = match args.target {
+    if args.java_pretouch {
+        v.push("-XX:+AlwaysPreTouch".into());
+    }
+    v
+}
+
+fn server_command(args: &RunArgs, dir: &Path) -> eyre::Result<Command> {
+    let (program, argv): (OsString, Vec<OsString>) = match args.target {
         Target::Vanilla => {
-            let mut c = Command::new(&args.java);
-            c.args(&heap)
-                .arg("-jar")
-                .arg(std::fs::canonicalize(&args.server)?)
-                .arg("--nogui");
-            c
+            let mut a = java_heap_args(args);
+            a.extend([
+                "-jar".into(),
+                std::fs::canonicalize(&args.server)?.into(),
+                "--nogui".into(),
+            ]);
+            (args.java.clone().into(), a)
         }
         Target::Neoforge => {
-            let mut c = Command::new(&args.java);
-            c.args(&heap)
-                .arg(neoforge_args_file(&args.server)?)
-                .arg("--nogui");
-            c
+            let mut a = java_heap_args(args);
+            a.extend([neoforge_args_file(&args.server)?.into(), "--nogui".into()]);
+            (args.java.clone().into(), a)
         }
-        Target::Pumpkin => Command::new(std::fs::canonicalize(&args.server)?),
+        Target::Pumpkin => (std::fs::canonicalize(&args.server)?.into(), Vec::new()),
     };
+    let (program, argv) = pin::wrap(program, argv, args.server_cpus.as_deref());
+    let mut cmd = Command::new(program);
+    cmd.args(argv);
     cmd.current_dir(dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -467,6 +527,7 @@ impl ProcSampler {
         let now = Instant::now();
         let cpu_ms = proc.accumulated_cpu_time();
         let rss_mb = proc.memory() as f64 / 1_048_576.0;
+        let footprint_mb = mem::footprint_mb(self.pid.as_u32());
         let prev = self.last.replace((now, cpu_ms));
         let (then, prev_cpu) = prev?;
         let wall_ms = now.duration_since(then).as_secs_f64() * 1000.0;
@@ -474,7 +535,9 @@ impl ProcSampler {
             at_ms: now_ms(),
             cpu_pct: cpu_ms.saturating_sub(prev_cpu) as f64 / wall_ms * 100.0,
             rss_mb,
+            footprint_mb,
             host_other_cpu_pct: 0.0,
+            host_available_mb: None,
         })
     }
 }
@@ -495,6 +558,59 @@ impl HostSampler {
         self.sys.refresh_cpu_usage();
         f64::from(self.sys.global_cpu_usage()) * self.sys.cpus().len() as f64
     }
+
+    fn available_mb(&mut self) -> f64 {
+        self.sys.refresh_memory();
+        self.sys.available_memory() as f64 / 1_048_576.0
+    }
+
+    /// Mean whole-host busy time over `secs` seconds, % of one core.
+    async fn busy_over(&mut self, secs: u64) -> f64 {
+        self.busy_pct();
+        let mut v = Vec::new();
+        for _ in 0..secs.max(1) {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            v.push(self.busy_pct());
+        }
+        mean(&v)
+    }
+}
+
+/// Waits up to `wait_secs` for the host to be quiet before a run starts; returns the last
+/// reading. Never fails: a busy host is recorded, and the report's gate rejects the run.
+async fn wait_for_quiet_host(run_id: &str, wait_secs: u64, limit_pct: f64) -> f64 {
+    let mut host = HostSampler::new();
+    let deadline = Instant::now() + Duration::from_secs(wait_secs);
+    loop {
+        let busy = host.busy_over(5).await;
+        if busy <= limit_pct || Instant::now() >= deadline {
+            if busy > limit_pct {
+                eprintln!(
+                    "[{run_id}] host still busy ({busy:.0}% of a core, limit {limit_pct:.0}%) after {wait_secs}s; starting anyway, the run will be marked contended"
+                );
+            }
+            return busy;
+        }
+        eprintln!("[{run_id}] host busy ({busy:.0}% of a core, limit {limit_pct:.0}%); waiting");
+        tokio::time::sleep(Duration::from_secs(10)).await;
+    }
+}
+
+/// Forces a full GC on a Java server and reads its live heap. Run after the window closed.
+async fn java_live_heap_mb(jcmd: &Path, pid: u32) -> Option<f64> {
+    let jcmd_out = |what: &'static str| async move {
+        let out = Command::new(jcmd)
+            .arg(pid.to_string())
+            .arg(what)
+            .output()
+            .await
+            .ok()?;
+        out.status
+            .success()
+            .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+    };
+    jcmd_out("GC.run").await?;
+    mem::parse_heap_info_used_mb(&jcmd_out("GC.heap_info").await?)
 }
 
 /// Binding both addresses catches a process that holds only the loopback address, which the
@@ -558,9 +674,27 @@ fn client_tps(start: &BotsSnapshot, end: &BotsSnapshot) -> Option<f64> {
 }
 
 pub async fn run(mut args: RunArgs) -> eyre::Result<PathBuf> {
+    pin::validate(
+        args.server_cpus.as_deref(),
+        args.bots_cpus.as_deref(),
+        Host::detect().logical_cpus,
+        pin::OS_SUPPORTS_PINNING,
+    )?;
+    let target_name = format!("{:?}", args.target).to_lowercase();
+    let pre_run_host_busy_pct = if args.quiet_wait_secs > 0 {
+        Some(
+            wait_for_quiet_host(
+                &format!("{target_name}-{}bots", args.bots),
+                args.quiet_wait_secs,
+                args.max_host_other_cpu_pct,
+            )
+            .await,
+        )
+    } else {
+        None
+    };
     args.port = choose_port(args.port)?;
     let started_at_ms = now_ms();
-    let target_name = format!("{:?}", args.target).to_lowercase();
     let run_id = format!("{target_name}-{}bots-{started_at_ms}", args.bots);
     let dir = args.work_root.join(&run_id);
     prepare_dir(&args, &dir)?;
@@ -602,8 +736,9 @@ pub async fn run(mut args: RunArgs) -> eyre::Result<PathBuf> {
         eprintln!("[{run_id}] server ready after {server_ready_secs:.1}s; connecting {} bots", args.bots);
 
         let snapshot_path = dir.join("bots-snapshot.json");
-        let exe = std::env::current_exe()?;
-        let mut bots = Command::new(exe)
+        let (bots_program, bots_prefix) = pin::wrap(std::env::current_exe()?.into(), Vec::new(), args.bots_cpus.as_deref());
+        let mut bots = Command::new(bots_program)
+            .args(bots_prefix)
             .arg("bots")
             .arg("--address")
             .arg(format!("127.0.0.1:{}", args.port))
@@ -670,9 +805,11 @@ pub async fn run(mut args: RunArgs) -> eyre::Result<PathBuf> {
             }
             tick.tick().await;
             let host_busy = host_sampler.busy_pct();
+            let host_available = host_sampler.available_mb();
             let bot = bots_sampler.sample().map(|s| s.cpu_pct);
             if let Some(mut sample) = server_sampler.sample() {
                 sample.host_other_cpu_pct = (host_busy - sample.cpu_pct - bot.unwrap_or(0.0)).max(0.0);
+                sample.host_available_mb = Some(host_available);
                 samples.push(sample);
             }
             bot_cpu.extend(bot);
@@ -687,8 +824,18 @@ pub async fn run(mut args: RunArgs) -> eyre::Result<PathBuf> {
         tokio::time::sleep(Duration::from_millis(1100)).await;
         let end = BotsSnapshot::read(&snapshot_path)?;
         let _ = bots.kill().await;
+        let live_heap = match args.target {
+            Target::Vanilla | Target::Neoforge => {
+                let heap = java_live_heap_mb(&args.jcmd, server_pid).await;
+                if heap.is_none() {
+                    eprintln!("[{run_id}] could not read the live heap with {}", args.jcmd.display());
+                }
+                heap
+            }
+            Target::Pumpkin => None,
+        };
 
-        Ok::<_, eyre::Report>((server_ready_secs, bots_all_joined_secs, start, end, samples, bot_cpu))
+        Ok::<_, eyre::Report>((server_ready_secs, bots_all_joined_secs, start, end, samples, bot_cpu, live_heap))
     }
     .await;
 
@@ -702,7 +849,8 @@ pub async fn run(mut args: RunArgs) -> eyre::Result<PathBuf> {
         let _ = server.kill().await;
     }
 
-    let (server_ready_secs, bots_all_joined_secs, start, end, samples, bot_cpu) = result?;
+    let (server_ready_secs, bots_all_joined_secs, start, end, samples, bot_cpu, java_live_heap_mb) =
+        result?;
     let queries = std::mem::take(&mut console.lock().queries);
 
     let work = WindowWork {
@@ -729,6 +877,7 @@ pub async fn run(mut args: RunArgs) -> eyre::Result<PathBuf> {
 
     let cpu: Vec<f64> = samples.iter().map(|s| s.cpu_pct).collect();
     let rss: Vec<f64> = samples.iter().map(|s| s.rss_mb).collect();
+    let footprint: Vec<f64> = samples.iter().filter_map(|s| s.footprint_mb).collect();
     let opt_mean = |v: Vec<f64>| (!v.is_empty()).then(|| mean(&v));
     let summary = Summary {
         mspt_mean: opt_mean(queries.iter().map(|q| q.mspt_avg).collect()),
@@ -741,6 +890,13 @@ pub async fn run(mut args: RunArgs) -> eyre::Result<PathBuf> {
         cpu_pct_p95: percentile(&cpu, 95.0),
         rss_mb_mean: mean(&rss),
         rss_mb_peak: rss.iter().copied().fold(0.0, f64::max),
+        footprint_mb_peak: footprint.iter().copied().reduce(f64::max),
+        footprint_mb_mean: opt_mean(footprint),
+        java_live_heap_mb,
+        host_available_mb_min: samples
+            .iter()
+            .filter_map(|s| s.host_available_mb)
+            .reduce(f64::min),
         bot_cpu_pct_mean: mean(&bot_cpu),
         host_other_cpu_pct_mean: mean(
             &samples
@@ -770,7 +926,7 @@ pub async fn run(mut args: RunArgs) -> eyre::Result<PathBuf> {
     }
 
     let result = RunResult {
-        schema: 1,
+        schema: 2,
         target: args.target,
         label: args.label.clone(),
         started_at_ms,
@@ -784,9 +940,13 @@ pub async fn run(mut args: RunArgs) -> eyre::Result<PathBuf> {
             simulation_distance: args.simulation_distance,
             java_heap: args.java_heap.clone(),
             join_delay_ms: args.join_delay_ms,
+            java_pretouch: args.java_pretouch,
+            server_cpus: args.server_cpus.clone(),
+            bots_cpus: args.bots_cpus.clone(),
         },
         server_ready_secs,
         bots_all_joined_secs,
+        pre_run_host_busy_pct,
         work,
         summary,
         invalid_reasons,
@@ -795,16 +955,31 @@ pub async fn run(mut args: RunArgs) -> eyre::Result<PathBuf> {
     };
     let out = args.out_dir.join(format!("{run_id}.json"));
     std::fs::write(&out, serde_json::to_vec_pretty(&result)?)?;
+    let contention = gate::evaluate(
+        &result.samples,
+        gate::GateLimits {
+            max_host_other_cpu_pct: args.max_host_other_cpu_pct,
+            ..gate::GateLimits::default()
+        },
+    );
     eprintln!(
-        "[{run_id}] mspt {:?} cpu {:.1}% rss {:.0} MB tps {:?}{}",
+        "[{run_id}] mspt {:?} cpu {:.1}% rss {:.0} MB footprint {:?} MB live heap {:?} MB tps {:?}, other host load {:.0}%{}{}",
         result.summary.mspt_mean,
         result.summary.cpu_pct_mean,
         result.summary.rss_mb_mean,
+        result.summary.footprint_mb_mean.map(f64::round),
+        result.summary.java_live_heap_mb.map(f64::round),
         result.summary.tps_client,
+        contention.mean_pct,
         if result.invalid_reasons.is_empty() {
             String::new()
         } else {
             format!(" INVALID: {:?}", result.invalid_reasons)
+        },
+        if contention.contended() {
+            format!(" CONTENDED: {:?}", contention.reasons)
+        } else {
+            String::new()
         }
     );
     if !args.keep_run_dir {

@@ -16,6 +16,8 @@ description = "Bot load-test harness that compares Minecraft Java servers (vanil
 azalea = { git = "https://github.com/azalea-rs/azalea", rev = "8041a14706fbdb2b8c481d2e8960d7411e850796", default-features = false, features = ["packet-event"] }
 clap = { version = "=4.6.7", features = ["derive"] }
 eyre = "=0.6.14"
+# proc_pid_rusage (macOS process footprint); already in the lock file through tokio.
+libc = "=0.2.189"
 parking_lot = "=0.12.5"
 regex = "=1.13.1"
 serde = { version = "=1.0.229", features = ["derive"] }
