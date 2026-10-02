@@ -20,6 +20,11 @@ pub struct ReportArgs {
     /// Coefficient of variation (%) above which a metric is too noisy to compare on.
     #[arg(long, default_value_t = 10.0)]
     pub max_cv_pct: f64,
+    /// Leave out runs during which other processes on the host used more than this much CPU
+    /// (% of one core, window mean). Off by default; every run records the value and the
+    /// report shows it, so its effect on the spread is visible either way.
+    #[arg(long)]
+    pub max_host_other_cpu_pct: Option<f64>,
 }
 
 /// Metrics the verdict is based on; the rest are reported for context.
@@ -85,6 +90,7 @@ struct Group {
 #[derive(Serialize)]
 struct Report {
     max_cv_pct: f64,
+    max_host_other_cpu_pct: Option<f64>,
     host: Option<crate::run::Host>,
     groups: Vec<Group>,
     comparable: bool,
@@ -114,6 +120,10 @@ fn load(inputs: &[PathBuf]) -> eyre::Result<Vec<(PathBuf, RunResult)>> {
         .collect()
 }
 
+fn too_noisy(run: &RunResult, limit: Option<f64>) -> bool {
+    limit.is_some_and(|l| run.summary.host_other_cpu_pct_mean > l)
+}
+
 fn ratio(done: u64, sent: u64) -> f64 {
     if sent == 0 {
         0.0
@@ -137,9 +147,9 @@ pub fn report(args: &ReportArgs) -> eyre::Result<()> {
 
     let mut groups = Vec::new();
     for ((target, label, bots), runs) in grouped {
-        let (valid, invalid): (Vec<_>, Vec<_>) = runs
-            .into_iter()
-            .partition(|(_, r)| r.invalid_reasons.is_empty());
+        let (valid, invalid): (Vec<_>, Vec<_>) = runs.into_iter().partition(|(_, r)| {
+            r.invalid_reasons.is_empty() && !too_noisy(r, args.max_host_other_cpu_pct)
+        });
         let mut metrics = BTreeMap::new();
         for (key, _, get) in METRICS {
             let values: Vec<f64> = valid.iter().filter_map(|(_, r)| get(&r.summary)).collect();
@@ -182,7 +192,19 @@ pub fn report(args: &ReportArgs) -> eyre::Result<()> {
             runs: valid.len(),
             invalid_runs: invalid
                 .iter()
-                .map(|(p, r)| format!("{}: {}", p.display(), r.invalid_reasons.join("; ")))
+                .map(|(p, r)| {
+                    let mut reasons = r.invalid_reasons.clone();
+                    if let Some(limit) = args.max_host_other_cpu_pct
+                        && too_noisy(r, Some(limit))
+                    {
+                        reasons.push(format!(
+                            "other processes used {:.0}% of a core (limit {limit:.0}%)",
+                            r.summary.host_other_cpu_pct_mean
+                        ));
+                    }
+                    let name = p.file_name().unwrap_or_default().to_string_lossy();
+                    format!("{name}: {}", reasons.join("; "))
+                })
                 .collect(),
             place_confirm_ratio: mean(
                 &rs.iter()
@@ -217,6 +239,7 @@ pub fn report(args: &ReportArgs) -> eyre::Result<()> {
             .all(|g| g.runs >= 3 && g.noisy_headline_metrics.is_empty());
     let report = Report {
         max_cv_pct: args.max_cv_pct,
+        max_host_other_cpu_pct: args.max_host_other_cpu_pct,
         host,
         groups,
         comparable,
@@ -246,8 +269,16 @@ fn markdown(report: &Report) -> String {
     let _ = writeln!(
         md,
         "Values are mean ± sample stddev over valid runs (CV in brackets). A headline metric \
-         (CPU, MSPT, RSS) with CV above {:.0}% or fewer than 3 runs is flagged as too noisy to compare.\n",
-        report.max_cv_pct
+         (CPU, MSPT, RSS) with CV above {:.0}% or fewer than 3 runs is flagged as too noisy to compare. \
+         {}\n",
+        report.max_cv_pct,
+        report.max_host_other_cpu_pct.map_or_else(
+            || "Runs were not filtered on other load on the host; see the \"Other host CPU\" row."
+                .to_string(),
+            |l| format!(
+                "Runs during which other processes used more than {l:.0}% of a core are left out."
+            )
+        )
     );
     let _ = writeln!(
         md,
