@@ -74,7 +74,8 @@ impl ClientPacket for CMultiBlockUpdate {
 
             for (pos, state_id) in &self.updates {
                 let local_pos = pack_local_chunk_section(pos) as u64;
-                let raw_state_id = state_id.as_u16();
+                // Runtime (mod) states go out as their vanilla carrier state.
+                let raw_state_id = pumpkin_data::runtime_registry::java_state_id(*state_id);
                 let packed = (u64::from(raw_state_id) << 12) | (local_pos & 0xFFF);
                 write.write_var_long(&VarLong(packed as i64))?;
             }
@@ -91,7 +92,8 @@ impl ClientPacket for CMultiBlockUpdate {
                 let packed_pos = (rel_x << 12) | (rel_z << 8) | rel_y;
                 write.write_i16_be(packed_pos as i16)?;
 
-                let raw_state_id = state_id.as_u16();
+                // Runtime (mod) states go out as their vanilla carrier state.
+                let raw_state_id = pumpkin_data::runtime_registry::java_state_id(*state_id);
                 write.write_i16_be(raw_state_id as i16)?;
             }
         } else {
@@ -106,7 +108,8 @@ impl ClientPacket for CMultiBlockUpdate {
                 let packed_pos = (rel_x << 12) | (rel_z << 8) | rel_y;
                 write.write_i16_be(packed_pos as i16)?;
 
-                let raw_state_id = state_id.as_u16();
+                // Runtime (mod) states go out as their vanilla carrier state.
+                let raw_state_id = pumpkin_data::runtime_registry::java_state_id(*state_id);
                 write.write_var_int(&VarInt(i32::from(raw_state_id)))?;
             }
         }

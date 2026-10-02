@@ -37,7 +37,10 @@ impl ClientPacket for CBlockUpdate {
     ) -> Result<(), WritingError> {
         let mut write = write;
         write.write_block_pos(&self.location, version)?;
-        write.write_var_int(&self.state_id)?;
+        // Runtime (mod) states go out as their vanilla carrier state.
+        write.write_var_int(&VarInt(pumpkin_data::runtime_registry::java_state_id_i32(
+            self.state_id.0,
+        )))?;
 
         Ok(())
     }

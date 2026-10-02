@@ -269,12 +269,12 @@ use pumpkin_protocol::java::client::play::{
     CCloseContainer, CCombatDeath, CCustomPayload, CDisguisedChatMessage, CEntityAnimation,
     CEntityPositionSync, CEntityVelocity, CGameEvent, CHurtAnimation, CItemCooldown, CMapItemData,
     COpenBook, COpenScreen, COpenSignEditor, CParticle, CPlayServerLinks, CPlayerAbilities,
-    CPlayerInfoUpdate, CPlayerPosition, CPlayerSpawnPosition, CRespawn, CSetCamera,
-    CSetContainerContent, CSetContainerProperty, CSetContainerSlot, CSetCursorItem, CSetExperience,
-    CSetHealth, CSetPlayerInventory, CSetSelectedSlot, CSoundEffect, CStopSound, CSubtitle,
-    CSystemChatMessage, CTabList, CTitleAnimation, CTitleText, CUnloadChunk, CUpdateMobEffect,
-    CUpdateTime, GameEvent, MapIcon, MapPatch, PlayerAction, PlayerInfoFlags, PlayerSpawnData,
-    PreviousMessage, Statistic,
+    CPlayerInfoUpdate, CPlayerPosition, CPlayerSpawnPosition, CRespawn, CSetBlockDestroyStage,
+    CSetCamera, CSetContainerContent, CSetContainerProperty, CSetContainerSlot, CSetCursorItem,
+    CSetExperience, CSetHealth, CSetPlayerInventory, CSetSelectedSlot, CSoundEffect, CStopSound,
+    CSubtitle, CSystemChatMessage, CTabList, CTitleAnimation, CTitleText, CUnloadChunk,
+    CUpdateMobEffect, CUpdateTime, GameEvent, MapIcon, MapPatch, PlayerAction, PlayerInfoFlags,
+    PlayerSpawnData, PreviousMessage, Statistic,
 };
 use pumpkin_protocol::java::server::play::{
     SClickSlot, SContainerButtonClick, SRenameItem, SlotActionType,
@@ -288,6 +288,30 @@ use pumpkin_util::text::TextComponent;
 use pumpkin_util::text::click::ClickEvent;
 use pumpkin_util::text::hover::HoverEvent;
 use pumpkin_util::{Difficulty, GameMode, Hand};
+
+/// Client-only `block_break_speed` modifier that freezes a Java client's own
+/// mining while the server drives the mining of a runtime block.
+const SERVER_MINING_MODIFIER: &str = "pml:server_mining";
+
+/// Whether a statistic names a block or item a vanilla client knows. Mined
+/// counts are keyed by block id and the item categories by item id; runtime
+/// (mod) ids in those must stay server-side.
+fn java_knows_statistic(category: i32, stat: i32) -> bool {
+    let Ok(id) = u16::try_from(stat) else {
+        return true;
+    };
+    match StatisticCategory::from_i32(category) {
+        Some(StatisticCategory::Mined) => id < pumpkin_data::BlockId::COUNT,
+        Some(
+            StatisticCategory::Crafted
+            | StatisticCategory::Used
+            | StatisticCategory::Broken
+            | StatisticCategory::PickedUp
+            | StatisticCategory::Dropped,
+        ) => id < pumpkin_data::item::Item::VANILLA_COUNT,
+        _ => true,
+    }
+}
 use pumpkin_world::biome;
 use pumpkin_world::cylindrical_chunk_iterator::Cylindrical;
 
@@ -453,6 +477,11 @@ pub struct Player {
     pub synced_mining_efficiency_level: AtomicI32,
     /// Indicates if the player is currently mining a block.
     pub mining: AtomicBool,
+    /// Set while a Java player mines a runtime (mod) block. The client only
+    /// knows the block's vanilla carrier, so it would predict the carrier's
+    /// break time: its own mining is frozen through the `block_break_speed`
+    /// attribute and the server drives progress and the break (PML spec §5.1).
+    pub server_driven_mining: AtomicBool,
     pub start_mining_time: AtomicI32,
     pub tick_counter: AtomicI32,
     pub mining_pos: Mutex<BlockPos>,
@@ -750,6 +779,7 @@ impl Player {
             experience_pick_up_delay: Mutex::new(0),
             teleport_id_count: AtomicI32::new(0),
             mining: AtomicBool::new(false),
+            server_driven_mining: AtomicBool::new(false),
             mining_pos: Mutex::new(BlockPos::ZERO),
             abilities: std::sync::Mutex::new(abilities),
             stats: std::sync::Mutex::new(statistics::Statistics::default()),
@@ -2919,7 +2949,12 @@ impl Player {
                     state,
                     p.start_mining_time.load(Ordering::Relaxed),
                 );
-                if finished && matches!(p.client.as_ref(), ClientPlatform::Bedrock(_)) {
+                // Bedrock clients, and Java clients mining a runtime block, do not
+                // send a trustworthy finish: the server breaks the block itself.
+                if finished
+                    && (matches!(p.client.as_ref(), ClientPlatform::Bedrock(_))
+                        || p.server_driven_mining.load(Ordering::Relaxed))
+                {
                     p.stop_mining();
 
                     let block = Block::from_state_id(state.id);
@@ -3044,10 +3079,94 @@ impl Player {
                     speed: speed_changed.then_some(speed),
                 },
             );
+            self.send_server_mining_stage(location, stage);
             self.current_block_destroy_stage
                 .store(stage, Ordering::Relaxed);
         }
         total_progress >= 1.0
+    }
+
+    /// Breaker id for the crack overlay the server draws for its own mining
+    /// progress on this player's client. It must differ from the player's entity
+    /// id, which the client's own (frozen) mining keeps resetting.
+    const fn server_mining_breaker_id(&self) -> i32 {
+        -1 - self.entity_id()
+    }
+
+    /// Shows server-driven mining progress to the miner (others get it from
+    /// `World::set_block_breaking`). No-op unless mining is server-driven.
+    fn send_server_mining_stage(&self, location: BlockPos, stage: i32) {
+        if self.server_driven_mining.load(Ordering::Relaxed) {
+            self.try_send_client_packet(&CSetBlockDestroyStage::new(
+                self.server_mining_breaker_id().into(),
+                location,
+                stage as i8,
+            ));
+        }
+    }
+
+    /// Starts server-driven mining of a runtime block at `location` (Java only):
+    /// freezes the client's own progress and shows the server's instead.
+    pub(crate) fn start_server_driven_mining(&self, location: BlockPos, stage: i32) {
+        if !matches!(self.client.as_ref(), ClientPlatform::Java(_)) {
+            return;
+        }
+        if !self.server_driven_mining.swap(true, Ordering::Relaxed) {
+            self.send_client_block_break_speed(true);
+        }
+        self.send_server_mining_stage(location, stage);
+    }
+
+    /// Ends server-driven mining, if active: clears the crack overlay and gives
+    /// the client back its real `block_break_speed`.
+    pub(crate) fn end_server_driven_mining(&self, location: BlockPos) {
+        if self.server_driven_mining.swap(false, Ordering::Relaxed) {
+            self.try_send_client_packet(&CSetBlockDestroyStage::new(
+                self.server_mining_breaker_id().into(),
+                location,
+                -1,
+            ));
+            self.send_client_block_break_speed(false);
+        }
+    }
+
+    /// Sends this player's own `block_break_speed` attribute, optionally with a
+    /// client-only modifier that multiplies it by zero. The server's copy of the
+    /// attribute is never changed.
+    fn send_client_block_break_speed(&self, frozen: bool) {
+        use pumpkin_protocol::java::client::play::{
+            AttributeModifier, CUpdateAttributes, Property,
+        };
+        let attribute = Attributes::BLOCK_BREAK_SPEED;
+        let mut modifiers: Vec<AttributeModifier> = self
+            .living_entity
+            .attributes
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&attribute.id)
+            .map(|instance| {
+                instance
+                    .modifiers
+                    .iter()
+                    .map(|m| AttributeModifier::new(m.id.clone(), m.amount, m.operation as i8))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if frozen {
+            modifiers.push(AttributeModifier::new(
+                SERVER_MINING_MODIFIER.to_string(),
+                -1.0,
+                crate::entity::attributes::ModifierOperation::MultiplyTotal as i8,
+            ));
+        }
+        self.try_send_client_packet(&CUpdateAttributes::new(
+            self.entity_id().into(),
+            vec![Property::new(
+                VarInt(i32::from(attribute.id)),
+                self.living_entity.get_attribute_base(&attribute),
+                modifiers,
+            )],
+        ));
     }
 
     pub(crate) fn stop_mining(&self) {
@@ -3055,12 +3174,13 @@ impl Player {
         let stage = self.current_block_destroy_stage.swap(-1, Ordering::Relaxed);
         self.current_block_breaking_speed
             .store(0, Ordering::Relaxed);
+        let pos = *self
+            .mining_pos
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.end_server_driven_mining(pos);
 
         if was_mining || stage >= 0 {
-            let pos = *self
-                .mining_pos
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
             self.world().set_block_breaking(
                 &self.living_entity.entity,
                 pos,
@@ -3361,6 +3481,8 @@ impl Player {
                 stats_guard
                     .stats
                     .iter()
+                    // A runtime (mod) block or item id would not decode on a vanilla client.
+                    .filter(|((category, stat), _)| java_knows_statistic(*category, *stat))
                     .map(|((category, stat), value)| Statistic {
                         category_id: VarInt(*category),
                         statistic_id: VarInt(*stat),

@@ -57,7 +57,10 @@ impl ClientPacket for CWorldEvent {
         let mut write = write;
         write.write_i32_be(self.event)?;
         write.write_block_pos(&self.location, version)?;
-        write.write_i32_be(self.data)?;
+        // Block-state data must never carry a runtime id to a vanilla client.
+        write.write_i32_be(pumpkin_data::runtime_registry::java_level_event_data(
+            self.event, self.data,
+        ))?;
         write.write_bool(self.disable_relative_volume)?;
 
         Ok(())

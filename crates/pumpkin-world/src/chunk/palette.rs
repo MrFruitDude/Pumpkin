@@ -4,6 +4,7 @@ use pumpkin_data::{
     BlockState, BlockStateId,
     block_properties::{has_random_ticks, is_air, is_liquid},
     fluid::Fluid,
+    runtime_registry::{java_state_id, java_state_ids_in_place},
 };
 use pumpkin_util::encompassing_bits;
 use tracing::warn;
@@ -723,12 +724,15 @@ impl BlockPalette {
         }
     }
 
+    /// The Java network form of this section. Runtime (mod) states are written
+    /// as their vanilla carrier states, so the result only holds ids a vanilla
+    /// client knows (PML spec §5.1).
     #[must_use]
     pub fn convert_network(&self) -> NetworkSerialization<u16> {
         match self {
             Self::Homogeneous(registry_id) => NetworkSerialization {
                 bits_per_entry: 0,
-                palette: NetworkPalette::Single(registry_id.as_u16()),
+                palette: NetworkPalette::Single(java_state_id(*registry_id)),
                 packed_data: Box::new([]),
             },
             Self::Heterogeneous(data) => {
@@ -746,7 +750,7 @@ impl BlockPalette {
                                 let y = (current_idx + i) / (Self::SIZE * Self::SIZE);
                                 let z = ((current_idx + i) / Self::SIZE) % Self::SIZE;
                                 let x = (current_idx + i) % Self::SIZE;
-                                let value = data.get(x, y, z).as_u16();
+                                let value = java_state_id(data.get(x, y, z));
                                 debug_assert!((1u32 << bits_per_entry) > u32::from(value));
                                 acc |= (value as u64) << (bits_per_entry as u64 * i as u64);
                             }
@@ -763,12 +767,12 @@ impl BlockPalette {
                 } else {
                     let bits_per_entry = raw_bits_per_entry.max(BLOCK_NETWORK_MIN_MAP_BITS);
                     let (palette, packed) = self.to_palette_and_packed_data(bits_per_entry);
+                    let mut palette: Box<[u16]> = palette.iter().map(|v| v.as_u16()).collect();
+                    java_state_ids_in_place(&mut palette);
 
                     NetworkSerialization {
                         bits_per_entry,
-                        palette: NetworkPalette::Indirect(
-                            palette.iter().map(|v| v.as_u16()).collect(),
-                        ),
+                        palette: NetworkPalette::Indirect(palette),
                         packed_data: packed,
                     }
                 }

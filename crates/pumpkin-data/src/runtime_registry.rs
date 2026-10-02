@@ -28,6 +28,7 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{OnceLock, PoisonError, RwLock};
 
 #[cfg(feature = "block")]
@@ -62,6 +63,10 @@ pub enum RegistryError {
     UnknownBlock(String),
     /// The `u16` id space is exhausted.
     IdSpaceExhausted,
+    /// A [`Carrier::Vanilla`] names a state that is not a vanilla state.
+    InvalidCarrier(String),
+    /// More [`Carrier::FullCube`] states were requested than the carrier pool holds.
+    CarrierPoolExhausted { requested: usize, available: usize },
 }
 
 impl fmt::Display for RegistryError {
@@ -88,6 +93,19 @@ impl fmt::Display for RegistryError {
             }
             Self::UnknownBlock(name) => write!(f, "block item places unknown block {name:?}"),
             Self::IdSpaceExhausted => write!(f, "registry id space (u16) exhausted"),
+            Self::InvalidCarrier(name) => {
+                write!(
+                    f,
+                    "block {name:?} must use a vanilla block state as its carrier"
+                )
+            }
+            Self::CarrierPoolExhausted {
+                requested,
+                available,
+            } => write!(
+                f,
+                "{requested} full-cube carrier states requested, but the carrier pool holds {available}"
+            ),
         }
     }
 }
@@ -124,6 +142,23 @@ pub struct PropertyDef {
     pub values: Vec<String>,
 }
 
+/// How a vanilla Java client sees the states of a runtime block. The client only
+/// knows vanilla states, so every runtime state is sent as a vanilla "carrier"
+/// state instead (spec §5.1).
+#[cfg(feature = "block")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Carrier {
+    /// Look like the block's template state. The default.
+    Template,
+    /// Look like this vanilla state.
+    Vanilla(BlockStateId),
+    /// Take one free state per block state from the carrier pool, so the
+    /// resource pack can give each its own full-cube model. The pool is the note
+    /// block's states except its default: once any block uses it, every real
+    /// note block is sent as the default note block state, which looks the same.
+    FullCube,
+}
+
 /// Declarative definition of a runtime block.
 ///
 /// Physical behaviour (collision and outline shape, solidity, opacity, piston
@@ -139,6 +174,7 @@ pub struct BlockDef {
     blast_resistance: Option<f32>,
     luminance: Option<u8>,
     properties: Vec<PropertyDef>,
+    carrier: Carrier,
 }
 
 #[cfg(feature = "block")]
@@ -153,7 +189,15 @@ impl BlockDef {
             blast_resistance: None,
             luminance: None,
             properties: Vec::new(),
+            carrier: Carrier::Template,
         }
+    }
+
+    /// How vanilla clients see this block; [`Carrier::Template`] by default.
+    #[must_use]
+    pub const fn carrier(mut self, carrier: Carrier) -> Self {
+        self.carrier = carrier;
+        self
     }
 
     /// Copy shape, flags and block-level data from this vanilla state.
@@ -207,6 +251,11 @@ impl BlockDef {
         validate_name(&self.name)?;
         if self.template.as_u16() >= BlockStateId::COUNT {
             return Err(RegistryError::InvalidTemplate(self.name.clone()));
+        }
+        if let Carrier::Vanilla(state) = self.carrier
+            && state.as_u16() >= BlockStateId::COUNT
+        {
+            return Err(RegistryError::InvalidCarrier(self.name.clone()));
         }
         let mut seen = Vec::with_capacity(self.properties.len());
         for property in &self.properties {
@@ -315,6 +364,8 @@ impl Registrar {
             built
         });
         if stored {
+            #[cfg(feature = "block")]
+            NOTE_BLOCKS_COLLAPSED.store(frozen.blocks.collapse_note_blocks, Ordering::Release);
             Ok(frozen)
         } else {
             Err(RegistryError::Frozen)
@@ -324,11 +375,12 @@ impl Registrar {
     #[allow(clippy::too_many_lines)]
     fn build(self) -> Result<FrozenRegistry, RegistryError> {
         #[cfg(feature = "item")]
-        let (items, item_by_name, item_for_block) = {
+        let (items, item_by_name, item_for_block, item_base) = {
             let item_base = crate::item::Item::VANILLA_COUNT;
             let mut items = Vec::with_capacity(self.items.len());
             let mut item_by_name = HashMap::with_capacity(self.items.len());
             let mut item_for_block: HashMap<String, u16> = HashMap::new();
+            let mut base_ids = Vec::with_capacity(self.items.len());
             for (offset, def) in self.items.iter().enumerate() {
                 let id = u16::try_from(usize::from(item_base) + offset)
                     .map_err(|_| RegistryError::IdSpaceExhausted)?;
@@ -346,9 +398,15 @@ impl Registrar {
                     components: def.base.components,
                 });
                 item_by_name.insert(name, id);
+                base_ids.push(def.base.id);
             }
             let items: &'static [Item] = Box::leak(items.into_boxed_slice());
-            (items, item_by_name, item_for_block)
+            (
+                items,
+                item_by_name,
+                item_for_block,
+                base_ids.into_boxed_slice(),
+            )
         };
 
         #[cfg(feature = "block")]
@@ -377,6 +435,8 @@ impl Registrar {
             let mut state_block = Vec::with_capacity(state_total - state_base);
             let mut state_template = Vec::with_capacity(state_total - state_base);
             let mut state_props = Vec::with_capacity(state_total - state_base);
+            let mut state_wire = Vec::with_capacity(state_total - state_base);
+            let mut full_cube = Vec::new();
             let mut block_ranges = Vec::with_capacity(defs.len());
             let mut block_properties = Vec::with_capacity(defs.len());
 
@@ -418,10 +478,21 @@ impl Registrar {
                     state_block.push(block_id);
                     state_template.push(def.template);
                     state_props.push(decode_index(leaked_props, index));
+                    state_wire.push(match def.carrier {
+                        Carrier::Template => def.template.as_u16(),
+                        Carrier::Vanilla(state) => state.as_u16(),
+                        Carrier::FullCube => {
+                            full_cube.push((def.name.as_str(), index, state_wire.len()));
+                            // Filled in by the pool allocation below.
+                            0
+                        }
+                    });
                 }
                 block_ranges.push((first, def.state_count()));
                 block_properties.push(leaked_props);
             }
+
+            let collapse_note_blocks = allocate_carriers(&mut full_cube, &mut state_wire)?;
 
             let states: &'static [BlockState] = Box::leak(states.into_boxed_slice());
 
@@ -466,6 +537,8 @@ impl Registrar {
                 state_block: state_block.into_boxed_slice(),
                 state_template: state_template.into_boxed_slice(),
                 state_props: state_props.into_boxed_slice(),
+                state_wire: state_wire.into_boxed_slice(),
+                collapse_note_blocks,
                 block_properties: block_properties.into_boxed_slice(),
                 block_by_name,
             }
@@ -478,6 +551,8 @@ impl Registrar {
             items,
             #[cfg(feature = "item")]
             item_by_name,
+            #[cfg(feature = "item")]
+            item_base,
         })
     }
 }
@@ -530,6 +605,11 @@ struct BlockTables {
     state_block: Box<[BlockId]>,
     state_template: Box<[BlockStateId]>,
     state_props: Box<[Box<[(&'static str, &'static str)]>]>,
+    /// The vanilla state each frozen runtime state is sent as (§5.1).
+    state_wire: Box<[u16]>,
+    /// Whether the note-block carrier pool is in use, so real note blocks must
+    /// all be sent as the default note block state.
+    collapse_note_blocks: bool,
     block_properties: Box<[&'static [LeakedProperty]]>,
     block_by_name: HashMap<&'static str, BlockId>,
 }
@@ -543,6 +623,9 @@ pub struct FrozenRegistry {
     items: &'static [Item],
     #[cfg(feature = "item")]
     item_by_name: HashMap<&'static str, u16>,
+    /// The vanilla item each runtime item is sent as.
+    #[cfg(feature = "item")]
+    item_base: Box<[u16]>,
 }
 
 impl FrozenRegistry {
@@ -931,4 +1014,147 @@ pub(crate) fn item_by_name(name: &str) -> Option<&'static Item> {
     let frozen = FROZEN.get()?;
     let id = *frozen.item_by_name.get(name)?;
     item(id)
+}
+
+// ---------------------------------------------------------------------------
+// Java wire remap (phase P2): runtime ids never reach a vanilla client.
+// ---------------------------------------------------------------------------
+
+/// Set once at freeze when the note-block carrier pool is in use; read by the
+/// fast path of [`java_state_id`] so vanilla ids pay one relaxed load.
+#[cfg(feature = "block")]
+static NOTE_BLOCKS_COLLAPSED: AtomicBool = AtomicBool::new(false);
+
+/// The carrier pool, in allocation order: every note block state except the
+/// default one, which stays the look of real note blocks.
+#[cfg(feature = "block")]
+fn note_block_pool() -> impl Iterator<Item = u16> {
+    let default = Block::NOTE_BLOCK.default_state.id;
+    Block::NOTE_BLOCK
+        .states
+        .iter()
+        .map(|state| state.id)
+        .filter(move |id| *id != default)
+        .map(BlockStateId::as_u16)
+}
+
+/// Number of [`Carrier::FullCube`] states the pool can hand out.
+#[cfg(feature = "block")]
+#[must_use]
+pub fn carrier_pool_size() -> usize {
+    note_block_pool().count()
+}
+
+/// Gives every requested full-cube state a pool state. Assignment is sorted by
+/// block name, then state index, so it does not depend on registration order
+/// (spec §5.2). Returns whether the pool is in use.
+#[cfg(feature = "block")]
+fn allocate_carriers(
+    requests: &mut [(&str, usize, usize)],
+    state_wire: &mut [u16],
+) -> Result<bool, RegistryError> {
+    let available = carrier_pool_size();
+    if requests.len() > available {
+        return Err(RegistryError::CarrierPoolExhausted {
+            requested: requests.len(),
+            available,
+        });
+    }
+    requests.sort_unstable_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+    for (&(_, _, slot), carrier) in requests.iter().zip(note_block_pool()) {
+        state_wire[slot] = carrier;
+    }
+    Ok(!requests.is_empty())
+}
+
+/// The state id a vanilla Java client is sent for `id`: the carrier of a
+/// runtime state, the default note block state for a real note block while the
+/// note-block pool is in use, and `id` itself otherwise.
+#[cfg(feature = "block")]
+#[inline]
+#[must_use]
+pub fn java_state_id(id: BlockStateId) -> u16 {
+    let raw = id.as_u16();
+    if raw < BlockStateId::COUNT && !NOTE_BLOCKS_COLLAPSED.load(Ordering::Relaxed) {
+        return raw;
+    }
+    java_state_id_slow(raw)
+}
+
+#[cfg(feature = "block")]
+#[cold]
+fn java_state_id_slow(raw: u16) -> u16 {
+    if raw < BlockStateId::COUNT {
+        let first = Block::NOTE_BLOCK.states[0].id.as_u16();
+        if raw.wrapping_sub(first) < Block::NOTE_BLOCK.states.len() as u16 {
+            return Block::NOTE_BLOCK.default_state.id.as_u16();
+        }
+        return raw;
+    }
+    let Some(frozen) = FROZEN.get() else {
+        // Not minted by the registry; air is the only safe answer.
+        return Block::AIR.default_state.id.as_u16();
+    };
+    let tables = &frozen.blocks;
+    if raw < tables.state_end {
+        tables.state_wire[usize::from(raw - tables.state_base)]
+    } else {
+        // Missing-mapping placeholders look like the placeholder block.
+        tables.state_wire[0]
+    }
+}
+
+/// [`java_state_id`] over a batch of raw state ids, in place. Used for chunk
+/// palettes and multi-block updates so a section pays its checks once per entry
+/// with no per-entry call into anything but this loop (D9).
+#[cfg(feature = "block")]
+pub fn java_state_ids_in_place(ids: &mut [u16]) {
+    if !NOTE_BLOCKS_COLLAPSED.load(Ordering::Relaxed)
+        && ids.iter().all(|&raw| raw < BlockStateId::COUNT)
+    {
+        return;
+    }
+    for raw in ids {
+        *raw = java_state_id(BlockStateId::from_raw(*raw));
+    }
+}
+
+/// [`java_state_id`] for a state id already widened to a protocol `i32`.
+/// Values outside the `u16` range are not state ids and pass through.
+#[cfg(feature = "block")]
+#[must_use]
+pub fn java_state_id_i32(raw: i32) -> i32 {
+    u16::try_from(raw).map_or(raw, |raw| {
+        i32::from(java_state_id(BlockStateId::from_raw(raw)))
+    })
+}
+
+/// Level events whose data is a block state id: block break particles + sound
+/// (2001) and brushing completion (3008).
+#[cfg(feature = "block")]
+#[must_use]
+pub fn java_level_event_data(event: i32, data: i32) -> i32 {
+    if matches!(event, 2001 | 3008) {
+        java_state_id_i32(data)
+    } else {
+        data
+    }
+}
+
+/// Whether `id` is a runtime (non-vanilla) state, including placeholders.
+#[cfg(feature = "block")]
+#[inline]
+#[must_use]
+pub const fn is_runtime_state(id: BlockStateId) -> bool {
+    id.as_u16() >= BlockStateId::COUNT
+}
+
+/// The vanilla item a runtime item is sent to Java clients as, or `None` for a
+/// vanilla item id.
+#[cfg(feature = "item")]
+#[must_use]
+pub fn java_base_item(id: u16) -> Option<&'static Item> {
+    let index = usize::from(id.checked_sub(Item::VANILLA_COUNT)?);
+    let base = *FROZEN.get()?.item_base.get(index)?;
+    Item::from_id(base)
 }
