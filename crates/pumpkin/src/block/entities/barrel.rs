@@ -27,12 +27,26 @@ pub struct BarrelBlockEntity {
     pub items: RwLock<[ItemStack; Self::INVENTORY_SIZE]>,
     pub dirty: AtomicBool,
     pub comparator_dirty: AtomicBool,
+    /// `CustomName` and `lock`.
+    pub name: super::container_name::ContainerName,
 
     // Viewer
     viewers: ViewerCountTracker,
 }
 
 impl BlockEntity for BarrelBlockEntity {
+    fn custom_name(&self) -> Option<pumpkin_util::text::TextComponent> {
+        self.name.custom_name()
+    }
+
+    fn apply_item_components(&self, stack: &ItemStack) {
+        self.name.apply_item_components(stack);
+    }
+
+    fn collect_item_components(&self, stack: &mut ItemStack) {
+        self.name.collect_custom_name(stack);
+    }
+
     fn resource_location(&self) -> &'static str {
         Self::ID
     }
@@ -50,6 +64,7 @@ impl BlockEntity for BarrelBlockEntity {
             items: RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
             dirty: AtomicBool::new(false),
             comparator_dirty: AtomicBool::new(false),
+            name: super::container_name::ContainerName::from_nbt(nbt),
             viewers: ViewerCountTracker::new(),
         };
 
@@ -65,6 +80,7 @@ impl BlockEntity for BarrelBlockEntity {
     }
 
     fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.name.write_nbt(nbt);
         self.write_inventory_nbt(nbt, true);
     }
 
@@ -129,6 +145,7 @@ impl BarrelBlockEntity {
             items: RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
             dirty: AtomicBool::new(false),
             comparator_dirty: AtomicBool::new(false),
+            name: super::container_name::ContainerName::new(),
             viewers: ViewerCountTracker::new(),
         }
     }

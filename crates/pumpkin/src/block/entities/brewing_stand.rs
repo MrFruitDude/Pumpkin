@@ -23,6 +23,8 @@ pub struct BrewingStandBlockEntity {
     pub items: RwLock<[ItemStack; Self::INVENTORY_SIZE]>,
     pub dirty: AtomicBool,
     pub comparator_dirty: AtomicBool,
+    /// `CustomName` and `lock`.
+    pub name: super::container_name::ContainerName,
     pub brew_time: AtomicI32,
     pub fuel: AtomicI32,
     pub last_potion_count: StdMutex<Option<[bool; 3]>>,
@@ -41,6 +43,7 @@ impl BrewingStandBlockEntity {
             items: RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
             dirty: AtomicBool::new(false),
             comparator_dirty: AtomicBool::new(false),
+            name: super::container_name::ContainerName::new(),
             brew_time: AtomicI32::new(0),
             fuel: AtomicI32::new(0),
             last_potion_count: StdMutex::new(None),
@@ -458,6 +461,18 @@ impl pumpkin_inventory::Clearable for BrewingStandBlockEntity {
 }
 
 impl crate::block::entities::BlockEntity for BrewingStandBlockEntity {
+    fn custom_name(&self) -> Option<pumpkin_util::text::TextComponent> {
+        self.name.custom_name()
+    }
+
+    fn apply_item_components(&self, stack: &ItemStack) {
+        self.name.apply_item_components(stack);
+    }
+
+    fn collect_item_components(&self, stack: &mut ItemStack) {
+        self.name.collect_custom_name(stack);
+    }
+
     fn resource_location(&self) -> &'static str {
         Self::ID
     }
@@ -471,6 +486,7 @@ impl crate::block::entities::BlockEntity for BrewingStandBlockEntity {
         Self: Sized,
     {
         let mut entity = Self::new(position);
+        entity.name = super::container_name::ContainerName::from_nbt(nbt);
 
         // Load brew time / fuel if present in NBT
         if let Some(bt) = nbt
@@ -524,6 +540,7 @@ impl crate::block::entities::BlockEntity for BrewingStandBlockEntity {
     }
 
     fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.name.write_nbt(nbt);
         // Persist brew state
         nbt.put_short("BrewTime", self.brew_time.load(Ordering::Relaxed) as i16);
         nbt.put_byte("Fuel", self.fuel.load(Ordering::Relaxed) as i8);

@@ -118,7 +118,7 @@ impl Item {
                 },
             ),
             (Lore, &LoreImpl { lines: Vec::new() }),
-            (MapDecorations, &MapDecorationsImpl),
+            (MapDecorations, &MapDecorationsImpl { decorations: None }),
             (
                 Rarity,
                 &RarityImpl {
@@ -2285,7 +2285,7 @@ impl Item {
                 },
             ),
             (BreakSound, &BreakSoundImpl),
-            (BucketEntityData, &BucketEntityDataImpl),
+            (BucketEntityData, &BucketEntityDataImpl { nbt: None }),
             (
                 Enchantments,
                 &EnchantmentsImpl {
@@ -11224,7 +11224,7 @@ impl Item {
                 },
             ),
             (Lore, &LoreImpl { lines: Vec::new() }),
-            (MapDecorations, &MapDecorationsImpl),
+            (MapDecorations, &MapDecorationsImpl { decorations: None }),
             (
                 Rarity,
                 &RarityImpl {
@@ -11274,7 +11274,7 @@ impl Item {
                 },
             ),
             (Lore, &LoreImpl { lines: Vec::new() }),
-            (MapDecorations, &MapDecorationsImpl),
+            (MapDecorations, &MapDecorationsImpl { decorations: None }),
             (
                 Rarity,
                 &RarityImpl {
@@ -11324,7 +11324,7 @@ impl Item {
                 },
             ),
             (Lore, &LoreImpl { lines: Vec::new() }),
-            (MapDecorations, &MapDecorationsImpl),
+            (MapDecorations, &MapDecorationsImpl { decorations: None }),
             (
                 Rarity,
                 &RarityImpl {
@@ -11374,7 +11374,7 @@ impl Item {
                 },
             ),
             (Lore, &LoreImpl { lines: Vec::new() }),
-            (MapDecorations, &MapDecorationsImpl),
+            (MapDecorations, &MapDecorationsImpl { decorations: None }),
             (
                 Rarity,
                 &RarityImpl {
@@ -16472,7 +16472,7 @@ impl Item {
                 },
             ),
             (BreakSound, &BreakSoundImpl),
-            (BucketEntityData, &BucketEntityDataImpl),
+            (BucketEntityData, &BucketEntityDataImpl { nbt: None }),
             (
                 Enchantments,
                 &EnchantmentsImpl {
@@ -24640,7 +24640,7 @@ impl Item {
                 },
             ),
             (BreakSound, &BreakSoundImpl),
-            (DebugStickState, &DebugStickStateImpl),
+            (DebugStickState, &DebugStickStateImpl { state: None }),
             (EnchantmentGlintOverride, &EnchantmentGlintOverrideImpl),
             (
                 Enchantments,
@@ -25588,7 +25588,7 @@ impl Item {
                 },
             ),
             (Lore, &LoreImpl { lines: Vec::new() }),
-            (MapDecorations, &MapDecorationsImpl),
+            (MapDecorations, &MapDecorationsImpl { decorations: None }),
             (
                 Rarity,
                 &RarityImpl {
@@ -25638,7 +25638,7 @@ impl Item {
                 },
             ),
             (Lore, &LoreImpl { lines: Vec::new() }),
-            (MapDecorations, &MapDecorationsImpl),
+            (MapDecorations, &MapDecorationsImpl { decorations: None }),
             (
                 Rarity,
                 &RarityImpl {
@@ -30545,7 +30545,7 @@ impl Item {
                 },
             ),
             (Lore, &LoreImpl { lines: Vec::new() }),
-            (MapDecorations, &MapDecorationsImpl),
+            (MapDecorations, &MapDecorationsImpl { decorations: None }),
             (
                 Rarity,
                 &RarityImpl {
@@ -32575,7 +32575,12 @@ impl Item {
                     enchantment: Cow::Borrowed(&[]),
                 },
             ),
-            (Instrument, &InstrumentImpl),
+            (
+                Instrument,
+                &InstrumentImpl {
+                    value: Cow::Borrowed("minecraft:ponder_goat_horn"),
+                },
+            ),
             (
                 ItemModel,
                 &ItemModelImpl {
@@ -40947,7 +40952,7 @@ impl Item {
                 },
             ),
             (Lore, &LoreImpl { lines: Vec::new() }),
-            (MapDecorations, &MapDecorationsImpl),
+            (MapDecorations, &MapDecorationsImpl { decorations: None }),
             (
                 Rarity,
                 &RarityImpl {
@@ -41475,7 +41480,7 @@ impl Item {
                     rarity: crate::data_component_impl::Rarity::Epic,
                 },
             ),
-            (Recipes, &RecipesImpl),
+            (Recipes, &RecipesImpl { recipes: None }),
             (RepairCost, &RepairCostImpl { cost: 0i32 }),
             (
                 AttackAnimation,
@@ -55240,7 +55245,7 @@ impl Item {
                 },
             ),
             (Lore, &LoreImpl { lines: Vec::new() }),
-            (MapDecorations, &MapDecorationsImpl),
+            (MapDecorations, &MapDecorationsImpl { decorations: None }),
             (
                 Rarity,
                 &RarityImpl {
@@ -61002,7 +61007,7 @@ impl Item {
                 },
             ),
             (Lore, &LoreImpl { lines: Vec::new() }),
-            (MapDecorations, &MapDecorationsImpl),
+            (MapDecorations, &MapDecorationsImpl { decorations: None }),
             (
                 Rarity,
                 &RarityImpl {
@@ -65218,7 +65223,7 @@ impl Item {
                 },
             ),
             (BreakSound, &BreakSoundImpl),
-            (BucketEntityData, &BucketEntityDataImpl),
+            (BucketEntityData, &BucketEntityDataImpl { nbt: None }),
             (
                 Enchantments,
                 &EnchantmentsImpl {
@@ -70768,7 +70773,7 @@ impl Item {
                 },
             ),
             (BreakSound, &BreakSoundImpl),
-            (BucketEntityData, &BucketEntityDataImpl),
+            (BucketEntityData, &BucketEntityDataImpl { nbt: None }),
             (
                 Enchantments,
                 &EnchantmentsImpl {
@@ -71126,7 +71131,7 @@ impl Item {
                 },
             ),
             (Lore, &LoreImpl { lines: Vec::new() }),
-            (MapDecorations, &MapDecorationsImpl),
+            (MapDecorations, &MapDecorationsImpl { decorations: None }),
             (
                 Rarity,
                 &RarityImpl {
@@ -74149,7 +74154,7 @@ impl Item {
                 },
             ),
             (Lore, &LoreImpl { lines: Vec::new() }),
-            (MapDecorations, &MapDecorationsImpl),
+            (MapDecorations, &MapDecorationsImpl { decorations: None }),
             (
                 Rarity,
                 &RarityImpl {
@@ -79365,7 +79370,7 @@ impl Item {
                 },
             ),
             (BreakSound, &BreakSoundImpl),
-            (BucketEntityData, &BucketEntityDataImpl),
+            (BucketEntityData, &BucketEntityDataImpl { nbt: None }),
             (
                 Enchantments,
                 &EnchantmentsImpl {
@@ -79896,7 +79901,7 @@ impl Item {
                 },
             ),
             (Lore, &LoreImpl { lines: Vec::new() }),
-            (MapDecorations, &MapDecorationsImpl),
+            (MapDecorations, &MapDecorationsImpl { decorations: None }),
             (
                 Rarity,
                 &RarityImpl {
@@ -80001,7 +80006,7 @@ impl Item {
                 },
             ),
             (BreakSound, &BreakSoundImpl),
-            (BucketEntityData, &BucketEntityDataImpl),
+            (BucketEntityData, &BucketEntityDataImpl { nbt: None }),
             (
                 Enchantments,
                 &EnchantmentsImpl {
@@ -80114,7 +80119,7 @@ impl Item {
                 },
             ),
             (Lore, &LoreImpl { lines: Vec::new() }),
-            (MapDecorations, &MapDecorationsImpl),
+            (MapDecorations, &MapDecorationsImpl { decorations: None }),
             (
                 Rarity,
                 &RarityImpl {
@@ -81336,7 +81341,7 @@ impl Item {
                 },
             ),
             (BreakSound, &BreakSoundImpl),
-            (BucketEntityData, &BucketEntityDataImpl),
+            (BucketEntityData, &BucketEntityDataImpl { nbt: None }),
             (
                 Enchantments,
                 &EnchantmentsImpl {
@@ -82771,7 +82776,7 @@ impl Item {
                 },
             ),
             (Lore, &LoreImpl { lines: Vec::new() }),
-            (MapDecorations, &MapDecorationsImpl),
+            (MapDecorations, &MapDecorationsImpl { decorations: None }),
             (
                 Rarity,
                 &RarityImpl {
@@ -90177,7 +90182,7 @@ impl Item {
                 },
             ),
             (Lore, &LoreImpl { lines: Vec::new() }),
-            (MapDecorations, &MapDecorationsImpl),
+            (MapDecorations, &MapDecorationsImpl { decorations: None }),
             (
                 Rarity,
                 &RarityImpl {

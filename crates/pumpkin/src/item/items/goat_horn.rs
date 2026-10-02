@@ -2,7 +2,7 @@ use std::any::Any;
 
 use crate::entity::player::Player;
 use crate::item::{ItemBehaviour, ItemMetadata};
-use pumpkin_data::data_component_impl::CustomDataImpl;
+use pumpkin_data::data_component_impl::{CustomDataImpl, InstrumentImpl};
 use pumpkin_data::instrument::Instrument;
 use pumpkin_data::item::Item;
 use pumpkin_data::sound::SoundCategory;
@@ -19,14 +19,19 @@ impl ItemBehaviour for GoatHornItem {
     fn normal_use(&self, _item: &Item, player: &Player) {
         let stack = player.inventory().held_item();
         let instrument = stack
-            .get_data_component::<CustomDataImpl>()
-            .and_then(|custom| {
-                custom
-                    .data
-                    .get_string("instrument")
-                    .or_else(|| custom.data.get_string("Instrument"))
+            .get_data_component::<InstrumentImpl>()
+            .and_then(|instrument| Instrument::from_name(&instrument.value))
+            .or_else(|| {
+                stack
+                    .get_data_component::<CustomDataImpl>()
+                    .and_then(|custom| {
+                        custom
+                            .data
+                            .get_string("instrument")
+                            .or_else(|| custom.data.get_string("Instrument"))
+                    })
+                    .and_then(Instrument::from_name)
             })
-            .and_then(Instrument::from_name)
             .unwrap_or(Instrument::PonderGoatHorn);
 
         player.world().play_sound(

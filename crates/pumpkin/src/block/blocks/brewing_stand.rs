@@ -74,9 +74,13 @@ impl BlockBehaviour for BrewingStandBlock {
         args: GetScreenHandlerFactoryArgs<'_>,
     ) -> Option<Box<dyn ScreenHandlerFactory>> {
         let block_entity = args.world.get_block_entity(args.position)?;
+        let custom_name = block_entity.custom_name();
         let inventory = block_entity.clone().get_inventory()?;
         let pd = block_entity.to_property_delegate()?;
-        Some(Box::new(BrewingScreenFactory(inventory, pd)))
+        crate::block::named_screen_factory(
+            custom_name,
+            Box::new(BrewingScreenFactory(inventory, pd)),
+        )
     }
 
     fn placed(&self, args: PlacedArgs<'_>) {

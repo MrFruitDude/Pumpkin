@@ -4142,12 +4142,6 @@ impl World {
             )
             .await;
 
-        player.living_entity.reset_state();
-
-        player.send_permission_lvl_update();
-
-        player.hunger_manager.restart();
-
         if !keep_inventory {
             player.set_experience(0, 0.0, 0);
             player.inventory.clear();
@@ -4158,6 +4152,17 @@ impl World {
         player.get_entity().set_pos(position);
         player.get_entity().set_rotation(yaw, pitch);
         player.get_entity().last_pos.store(position);
+
+        // Only now bring the player back to life. Restoring health first left a
+        // living player standing on its own death drops until the move above,
+        // and item entities ticking in between picked some of them up
+        // (upstream issue 3363). Vanilla creates the respawned player at the
+        // respawn position before it is ever alive.
+        player.living_entity.reset_state();
+
+        player.send_permission_lvl_update();
+
+        player.hunger_manager.restart();
 
         // TODO: difficulty, exp bar, status effect
 

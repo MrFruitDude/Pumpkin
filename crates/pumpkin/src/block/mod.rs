@@ -452,6 +452,41 @@ pub struct BlockEvent {
     pub data: u8,
 }
 
+/// A container screen titled with the block entity's custom name (vanilla
+/// `BaseContainerBlockEntity.getDisplayName`), or the factory's own default
+/// title when the container was never renamed.
+#[must_use]
+pub fn named_screen_factory(
+    custom_name: Option<pumpkin_util::text::TextComponent>,
+    factory: Box<dyn ScreenHandlerFactory>,
+) -> Option<Box<dyn ScreenHandlerFactory>> {
+    Some(match custom_name {
+        Some(name) => Box::new(NamedScreenFactory { factory, name }),
+        None => factory,
+    })
+}
+
+struct NamedScreenFactory {
+    factory: Box<dyn ScreenHandlerFactory>,
+    name: pumpkin_util::text::TextComponent,
+}
+
+impl ScreenHandlerFactory for NamedScreenFactory {
+    fn create_screen_handler(
+        &self,
+        sync_id: u8,
+        player_inventory: &Arc<pumpkin_inventory::player::player_inventory::PlayerInventory>,
+        player: &dyn pumpkin_inventory::screen_handler::InventoryPlayer,
+    ) -> Option<pumpkin_inventory::screen_handler::SharedScreenHandler> {
+        self.factory
+            .create_screen_handler(sync_id, player_inventory, player)
+    }
+
+    fn get_display_name(&self) -> pumpkin_util::text::TextComponent {
+        self.name.clone()
+    }
+}
+
 pub fn drop_loot(
     world: &Arc<World>,
     block: &Block,

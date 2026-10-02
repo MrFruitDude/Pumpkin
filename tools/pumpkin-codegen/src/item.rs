@@ -785,7 +785,7 @@ impl ToTokens for ItemComponents {
             tokens.extend(quote! { (BreakSound, &BreakSoundImpl), });
         }
         if self.bucket_entity_data.is_some() {
-            tokens.extend(quote! { (BucketEntityData, &BucketEntityDataImpl), });
+            tokens.extend(quote! { (BucketEntityData, &BucketEntityDataImpl { nbt: None }), });
         }
         if self.bundle_contents.is_some() {
             tokens.extend(quote! { (BundleContents, &BundleContentsImpl { items: Vec::new() }), });
@@ -819,7 +819,7 @@ impl ToTokens for ItemComponents {
             });
         }
         if self.debug_stick_state.is_some() {
-            tokens.extend(quote! { (DebugStickState, &DebugStickStateImpl), });
+            tokens.extend(quote! { (DebugStickState, &DebugStickStateImpl { state: None }), });
         }
         if self.dye.is_some() {
             tokens.extend(quote! { (Dye, &DyeImpl), });
@@ -913,8 +913,14 @@ impl ToTokens for ItemComponents {
         if self.glider.is_some() {
             tokens.extend(quote! { (Glider, &GliderImpl), });
         }
-        if self.instrument.is_some() {
-            tokens.extend(quote! { (Instrument, &InstrumentImpl), });
+        if let Some(instrument) = &self.instrument {
+            let instrument = instrument
+                .as_str()
+                .expect("minecraft:instrument default must be a registry reference");
+            let instrument_lit = LitStr::new(instrument, Span::call_site());
+            tokens.extend(quote! {
+                (Instrument, &InstrumentImpl { value: Cow::Borrowed(#instrument_lit) }),
+            });
         }
         if let Some(model) = &self.item_model {
             let model_lit = LitStr::new(model, Span::call_site());
@@ -956,7 +962,7 @@ impl ToTokens for ItemComponents {
             tokens.extend(quote! { (Lore, &LoreImpl { lines: Vec::new() }), });
         }
         if self.map_decorations.is_some() {
-            tokens.extend(quote! { (MapDecorations, &MapDecorationsImpl), });
+            tokens.extend(quote! { (MapDecorations, &MapDecorationsImpl { decorations: None }), });
         }
         if let Some(charge) = self.minimum_attack_charge {
             let charge = float_literal(charge);
@@ -1017,7 +1023,7 @@ impl ToTokens for ItemComponents {
             tokens.extend(quote! { (Rarity, &RarityImpl { rarity: #rarity_variant }), });
         }
         if self.recipes.is_some() {
-            tokens.extend(quote! { (Recipes, &RecipesImpl), });
+            tokens.extend(quote! { (Recipes, &RecipesImpl { recipes: None }), });
         }
         if let Some(cost) = self.repair_cost {
             tokens.extend(quote! { (RepairCost, &RepairCostImpl { cost: #cost }), });

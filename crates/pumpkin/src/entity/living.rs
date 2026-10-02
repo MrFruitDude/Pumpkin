@@ -2092,7 +2092,12 @@ impl LivingEntity {
             }
             self.entity.pose.store(EntityPose::Dying);
 
-            self.drop_equipment(looting_level);
+            // Vanilla `Player.dropEquipment` does not roll the mob equipment drop
+            // (8.5% chance, random durability); a player's armor and off hand drop
+            // with the rest of the inventory in `Player::handle_killed`.
+            if dyn_self.get_player().is_none() {
+                self.drop_equipment(looting_level);
+            }
 
             // Broadcast death message if it's a player and the gamerule is enabled
             self.broadcast_death_message(&*dyn_self, damage_type, source, cause);

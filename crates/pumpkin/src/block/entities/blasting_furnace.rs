@@ -24,6 +24,8 @@ pub struct BlastingFurnaceBlockEntity {
     pub position: BlockPos,
     pub dirty: AtomicBool,
     pub comparator_dirty: AtomicBool,
+    /// `CustomName` and `lock`.
+    pub name: super::container_name::ContainerName,
 
     pub cooking_time_spent: AtomicU16,
     pub cooking_total_time: AtomicU16,
@@ -47,6 +49,7 @@ impl BlastingFurnaceBlockEntity {
             position,
             dirty: AtomicBool::new(false),
             comparator_dirty: AtomicBool::new(false),
+            name: super::container_name::ContainerName::new(),
             items: RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
             cooking_total_time: AtomicU16::new(0),
             cooking_time_spent: AtomicU16::new(0),

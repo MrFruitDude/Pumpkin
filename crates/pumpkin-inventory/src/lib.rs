@@ -37,6 +37,8 @@ pub mod anvil;
 pub mod beacon_screen_handler;
 pub mod brewing;
 pub mod cartography_table_screen_handler;
+#[cfg(test)]
+mod click_tests;
 pub mod container_click;
 pub mod crafting;
 pub mod double;

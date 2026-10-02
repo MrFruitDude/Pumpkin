@@ -4807,30 +4807,13 @@ impl Player {
             crate::entity::player::advancement::trigger::AdvancementTrigger::PlayerKilled,
         );
         crate::entity::mob::neutral::tell_neutral_mobs_player_died(self, &self.world());
-        let block_pos = self.position().to_block_pos();
-
         let keep_inventory = { self.world().level_info.load().game_rules.keep_inventory };
 
         if !keep_inventory {
-            let mut main_inv = self
-                .inventory()
-                .main_inventory
-                .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            for item in main_inv.iter_mut() {
-                if !item.is_empty() {
-                    let stack = std::mem::replace(item, ItemStack::EMPTY.clone());
-                    self.increment_stat(
-                        statistics::StatisticCategory::Dropped,
-                        stack.item.id as i32,
-                        stack.item_count as i32,
-                    );
-                    self.increment_custom_stat(
-                        statistics::CustomStatistic::Drop,
-                        stack.item_count as i32,
-                    );
-                    self.world().drop_stack(&block_pos, stack);
-                }
+            // Vanilla `Player.dropEquipment`: the whole inventory, armor and off
+            // hand included, drops unchanged, scattered around the player.
+            for stack in self.inventory().take_death_drops() {
+                self.drop_death_stack(stack);
             }
         }
 
@@ -5092,6 +5075,24 @@ impl Player {
         let item_entity = Arc::new(ItemEntity::new_with_velocity(
             entity, item_stack, velocity, 40,
         ));
+        self.world().spawn_entity(item_entity);
+    }
+
+    /// Spawns one stack of a death drop the way vanilla
+    /// `LivingEntity.createItemStackToDrop(stack, true, false)` does: at eye
+    /// height minus 0.3, thrown in a random direction, with a 40 tick pickup
+    /// delay and no thrower.
+    fn drop_death_stack(&self, stack: ItemStack) {
+        if stack.is_empty() {
+            return;
+        }
+        let item_pos = self.living_entity.entity.pos.load()
+            + Vector3::new(0.0, self.living_entity.entity.get_eye_height() - 0.3, 0.0);
+        let entity = Entity::new(self.world(), item_pos, &EntityType::ITEM);
+        let power = f64::from(rand::random::<f32>() * 0.5);
+        let direction = f64::from(rand::random::<f32>()) * TAU;
+        let velocity = Vector3::new(-direction.sin() * power, 0.2, direction.cos() * power);
+        let item_entity = Arc::new(ItemEntity::new_with_velocity(entity, stack, velocity, 40));
         self.world().spawn_entity(item_entity);
     }
 

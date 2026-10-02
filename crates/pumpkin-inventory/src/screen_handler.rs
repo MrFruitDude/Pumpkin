@@ -54,7 +54,6 @@ use pumpkin_protocol::{
     },
 };
 use pumpkin_util::text::TextComponent;
-use std::cmp::max;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::{any::Any, collections::HashMap, sync::Arc};
@@ -764,6 +763,173 @@ pub trait ScreenHandler: Send + Sync {
         self.internal_on_slot_click(slot_index, button, action_type, player);
     }
 
+    /// Whether a double click may collect items from this slot.
+    ///
+    /// Vanilla excludes the result slot of crafting-style menus.
+    ///
+    /// Mojang name: `canTakeItemForPickAll`
+    fn can_take_item_for_pick_all(&self, _slot_index: usize) -> bool {
+        true
+    }
+
+    /// Double click with an item on the cursor: collects matching items from
+    /// the other slots into the cursor stack, the way vanilla `doClick` does
+    /// for `PICKUP_ALL`. Partial stacks are taken before full ones, and button
+    /// 1 walks the slots backwards.
+    fn handle_pickup_all(&mut self, slot_index: usize, button: i32, player: &dyn InventoryPlayer) {
+        let behaviour = self.get_behaviour();
+        let Some(clicked) = behaviour.slots.get(slot_index).cloned() else {
+            return;
+        };
+        let slots = behaviour.slots.clone();
+        let cursor = behaviour.cursor_stack.clone();
+        let eligible: Vec<bool> = (0..slots.len())
+            .map(|i| self.can_take_item_for_pick_all(i))
+            .collect();
+
+        let mut carried = cursor
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if carried.is_empty() || (clicked.has_stack() && clicked.can_take_items(player)) {
+            return;
+        }
+
+        let order: Vec<usize> = if button == 0 {
+            (0..slots.len()).collect()
+        } else {
+            (0..slots.len()).rev().collect()
+        };
+        for pass in 0..2 {
+            for &i in &order {
+                if carried.item_count >= carried.get_max_stack_size() {
+                    break;
+                }
+                let target = &slots[i];
+                let stack = target.get_cloned_stack();
+                if stack.is_empty()
+                    || !stack.are_items_and_components_equal(&carried)
+                    || !target.can_take_items(player)
+                    || !eligible[i]
+                {
+                    continue;
+                }
+                if pass == 0 && stack.item_count == stack.get_max_stack_size() {
+                    continue;
+                }
+                let room = carried.get_max_stack_size() - carried.item_count;
+                let removed = target.safe_take(stack.item_count, room, player);
+                carried.increment(removed.item_count);
+            }
+        }
+    }
+
+    /// Drag (`QUICK_CRAFT`) state machine, following vanilla `doClick`: a drag
+    /// is a start packet, one packet per slot dragged over, and an end packet
+    /// that spreads the cursor stack over the collected slots. Out-of-order
+    /// packets, an empty cursor or an invalid drag type cancel the drag.
+    fn handle_quick_craft(&mut self, slot_index: i32, button: i32, player: &dyn InventoryPlayer) {
+        let header = button & 3;
+        let drag_type = (button >> 2) & 3;
+        let behaviour = self.get_behaviour_mut();
+        let expected = behaviour.quickcraft_status;
+        behaviour.quickcraft_status = header;
+        let carried = behaviour
+            .cursor_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+
+        if ((expected != 1 || header != 2) && expected != header) || carried.is_empty() {
+            behaviour.reset_quick_craft();
+        } else if header == 0 {
+            behaviour.quickcraft_type = drag_type;
+            let valid = drag_type == 0
+                || drag_type == 1
+                || (drag_type == 2 && player.has_infinite_materials());
+            if valid {
+                behaviour.quickcraft_status = 1;
+                behaviour.drag_slots.clear();
+            } else {
+                behaviour.reset_quick_craft();
+            }
+        } else if header == 1 {
+            let Some(slot) = usize::try_from(slot_index)
+                .ok()
+                .and_then(|i| behaviour.slots.get(i))
+            else {
+                return;
+            };
+            if can_item_quick_replace(slot.as_ref(), &carried)
+                && slot.can_insert(&carried)
+                && (behaviour.quickcraft_type == 2
+                    || usize::from(carried.item_count) > behaviour.drag_slots.len())
+                && !behaviour.drag_slots.contains(&(slot_index as u32))
+            {
+                behaviour.drag_slots.push(slot_index as u32);
+            }
+        } else if header == 2 {
+            if behaviour.drag_slots.is_empty() {
+                behaviour.reset_quick_craft();
+                return;
+            }
+            if behaviour.drag_slots.len() == 1 {
+                let slot = behaviour.drag_slots[0] as i32;
+                let drag_type = behaviour.quickcraft_type;
+                behaviour.reset_quick_craft();
+                self.internal_on_slot_click(slot, drag_type, SlotActionType::Pickup, player);
+                return;
+            }
+
+            let drag_type = behaviour.quickcraft_type;
+            let slot_count = behaviour.drag_slots.len();
+            let mut remaining = i32::from(carried.item_count);
+            for slot_index in &behaviour.drag_slots {
+                let Some(slot) = behaviour.slots.get(*slot_index as usize) else {
+                    continue;
+                };
+                if can_item_quick_replace(slot.as_ref(), &carried)
+                    && slot.can_insert(&carried)
+                    && (drag_type == 2 || usize::from(carried.item_count) >= slot_count)
+                {
+                    let existing = slot.get_cloned_stack();
+                    let present = if existing.is_empty() {
+                        0
+                    } else {
+                        i32::from(existing.item_count)
+                    };
+                    let max_size = i32::from(
+                        carried
+                            .get_max_stack_size()
+                            .min(slot.get_max_item_count_for_stack(&carried)),
+                    );
+                    let place = match drag_type {
+                        0 => i32::from(carried.item_count) / slot_count as i32,
+                        1 => 1,
+                        2 => i32::from(carried.get_max_stack_size()),
+                        _ => i32::from(carried.item_count),
+                    };
+                    let new_count = (place + present).min(max_size);
+                    remaining -= new_count - present;
+                    slot.set_stack(carried.copy_with_count(new_count as u8));
+                }
+            }
+
+            let mut cursor = behaviour
+                .cursor_stack
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            *cursor = if remaining > 0 {
+                carried.copy_with_count(remaining as u8)
+            } else {
+                ItemStack::EMPTY.clone()
+            };
+            drop(cursor);
+            behaviour.reset_quick_craft();
+        } else {
+            behaviour.reset_quick_craft();
+        }
+    }
+
     /// Internal slot click handling implementation.
     ///
     /// Handles all click types: pickup, quick move, swap, throw, drag, clone.
@@ -775,156 +941,45 @@ pub trait ScreenHandler: Send + Sync {
         action_type: SlotActionType,
         player: &dyn InventoryPlayer,
     ) {
-        if action_type == SlotActionType::PickupAll && button == 0 {
-            let behavior = self.get_behaviour_mut();
-            let mut cursor_stack = behavior
-                .cursor_stack
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let mut to_pick_up = cursor_stack.get_max_stack_size() - cursor_stack.item_count;
-
-            for slot in &behavior.slots {
-                if to_pick_up == 0 {
-                    break;
-                }
-
-                let item_stack = slot.get_cloned_stack();
-                if !item_stack.are_items_and_components_equal(&cursor_stack) {
-                    continue;
-                }
-
-                if !slot.allow_modification(player) {
-                    continue;
-                }
-
-                let taken_stack = slot.safe_take(
-                    item_stack.item_count.min(to_pick_up),
-                    cursor_stack.get_max_stack_size() - cursor_stack.item_count,
-                    player,
-                );
-                to_pick_up -= taken_stack.item_count;
-                cursor_stack.increment(taken_stack.item_count);
-            }
-        } else if action_type == SlotActionType::QuickCraft {
-            let drag_type = button & 3;
-            let drag_button = (button >> 2) & 3;
-            let behaviour = self.get_behaviour_mut();
-            if drag_type == 0 {
-                behaviour.drag_slots.clear();
-            } else if drag_type == 1 {
-                if slot_index < 0 {
-                    warn!("Invalid slot index for drag action: {slot_index}. Must be >= 0");
-                    return;
-                }
-                let cursor_stack = behaviour
-                    .cursor_stack
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-
-                let slot = &behaviour.slots[slot_index as usize];
-                let stack = slot.get_stack();
-                if !cursor_stack.is_empty()
-                    && slot.can_insert(&cursor_stack)
-                    && (stack.are_items_and_components_equal(&cursor_stack) || stack.is_empty())
-                    && slot.get_max_item_count_for_stack(&stack) > stack.item_count
-                {
-                    behaviour.drag_slots.push(slot_index as u32);
-                }
-            } else if drag_type == 2 && !behaviour.drag_slots.is_empty() {
-                // process drag end
-                if behaviour.drag_slots.len() == 1 {
-                    let slot = behaviour.drag_slots[0] as i32;
-                    behaviour.drag_slots.clear();
-                    self.internal_on_slot_click(slot, drag_button, SlotActionType::Pickup, player);
-
-                    return;
-                }
-                if drag_button == 2 && !player.has_infinite_materials() {
-                    return; // Only creative
-                }
-
-                let mut cursor_stack = behaviour
-                    .cursor_stack
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                let initial_count = cursor_stack.item_count;
-                let slots_count = behaviour.drag_slots.len();
-                for slot_index in &behaviour.drag_slots {
-                    let Some(slot) = behaviour.slots.get(*slot_index as usize).cloned() else {
-                        continue;
-                    };
-                    let stack = slot.get_stack();
-
-                    if (stack.are_items_and_components_equal(&cursor_stack) || stack.is_empty())
-                        && slot.can_insert(&cursor_stack)
-                    {
-                        let mut inserting_count = match drag_button {
-                            0 => (initial_count as usize)
-                                .checked_div(slots_count)
-                                .map_or(0, |c| c as u8),
-                            1 => 1,
-                            2 => {
-                                cursor_stack.item_count = cursor_stack.get_max_stack_size();
-                                cursor_stack.item_count
-                            }
-                            _ => 0,
-                        };
-                        inserting_count = inserting_count
-                            .min(max(
-                                0,
-                                slot.get_max_item_count_for_stack(&stack) - stack.item_count,
-                            ))
-                            .min(cursor_stack.item_count);
-                        if inserting_count > 0 {
-                            let mut new_stack = stack.clone();
-                            if new_stack.is_empty() {
-                                new_stack = cursor_stack.copy_with_count(0);
-                            }
-                            new_stack.increment(inserting_count);
-                            slot.set_stack(new_stack);
-                            if drag_button != 2 {
-                                cursor_stack.decrement(inserting_count);
-                            }
-                            if cursor_stack.is_empty() {
-                                *cursor_stack = ItemStack::EMPTY.clone();
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                if drag_button == 2 {
-                    *cursor_stack = ItemStack::EMPTY.clone();
-                }
-                behaviour.drag_slots.clear();
+        if action_type == SlotActionType::QuickCraft {
+            self.handle_quick_craft(slot_index, button, player);
+        } else if self.get_behaviour().quickcraft_status != 0 {
+            // Vanilla `doClick`: any other click while a drag is in progress
+            // only cancels the drag.
+            self.get_behaviour_mut().reset_quick_craft();
+        } else if action_type == SlotActionType::PickupAll {
+            if slot_index >= 0 {
+                self.handle_pickup_all(slot_index as usize, button, player);
             }
         } else if action_type == SlotActionType::Throw {
-            if slot_index >= 0
-                && self
-                    .get_behaviour()
-                    .cursor_stack
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .is_empty()
+            // Vanilla `doClick` THROW: Q drops one item, Ctrl+Q the whole stack,
+            // and keeps dropping while the slot refills with the same item (a
+            // crafting result). The take itself calls `on_take_item` once.
+            let cursor_empty = self
+                .get_behaviour()
+                .cursor_stack
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_empty();
+            if cursor_empty
+                && slot_index >= 0
+                && let Some(slot) = self.get_behaviour().slots.get(slot_index as usize).cloned()
             {
-                let slot = self.get_behaviour().slots[slot_index as usize].clone();
-                let prev_stack = slot.get_cloned_stack();
-                if !prev_stack.is_empty() {
-                    if button == 1 {
-                        // Throw all
-                        while slot
-                            .get_cloned_stack()
-                            .are_items_and_components_equal(&prev_stack)
-                        {
-                            let drop_stack = slot.safe_take(prev_stack.item_count, u8::MAX, player);
-                            player.drop_item(drop_stack, true);
-                            // player.handleCreativeModeItemDrop(itemStack);
-                        }
-                    } else {
-                        let drop_stack = slot.safe_take(1, u8::MAX, player);
-                        if !drop_stack.is_empty() {
-                            slot.on_take_item(player, &drop_stack);
-                            player.drop_item(drop_stack, true);
+                let amount = if button == 0 {
+                    1
+                } else {
+                    slot.get_cloned_stack().item_count
+                };
+                let mut dropped = slot.safe_take(amount, u8::MAX, player);
+                if !dropped.is_empty() {
+                    player.drop_item(dropped.clone(), true);
+                }
+                if button == 1 {
+                    while !dropped.is_empty() && slot.get_cloned_stack().item.id == dropped.item.id
+                    {
+                        dropped = slot.safe_take(amount, u8::MAX, player);
+                        if !dropped.is_empty() {
+                            player.drop_item(dropped.clone(), true);
                         }
                     }
                 }
@@ -1202,6 +1257,18 @@ pub trait ScreenHandler: Send + Sync {
     }
 }
 
+/// Vanilla `AbstractContainerMenu.canItemQuickReplace` with `ignoreSize`: an
+/// empty slot, or one holding the same item and components that is not over
+/// the carried item's stack size.
+fn can_item_quick_replace(slot: &dyn Slot, carried: &ItemStack) -> bool {
+    let stack = slot.get_cloned_stack();
+    if stack.is_empty() {
+        return true;
+    }
+    stack.are_items_and_components_equal(carried)
+        && stack.item_count <= carried.get_max_stack_size()
+}
+
 pub trait ScreenHandlerListener: Send + Sync {
     fn on_slot_update(
         &self,
@@ -1261,6 +1328,10 @@ pub struct ScreenHandlerBehaviour {
     pub window_type: Option<WindowType>,
     /// Slots selected during a drag operation (for multi-slot distribution).
     pub drag_slots: Vec<u32>,
+    /// Drag state (vanilla `quickcraftStatus`): 0 idle, 1 collecting slots.
+    pub quickcraft_status: i32,
+    /// Drag type (vanilla `quickcraftType`): 0 split evenly, 1 one each, 2 full stacks (creative).
+    pub quickcraft_type: i32,
     /// Whether players can grab items out of the inventory.
     pub allow_grab_items: bool,
     /// Whether players can put items into the inventory from their own.
@@ -1301,10 +1372,18 @@ impl ScreenHandlerBehaviour {
             tracked_property_values: Vec::new(),
             window_type,
             drag_slots: Vec::new(),
+            quickcraft_status: 0,
+            quickcraft_type: -1,
             allow_grab_items: true,
             allow_put_items: true,
             container_slots: 0,
         }
+    }
+
+    /// Cancels a drag in progress (vanilla `resetQuickCraft`).
+    pub fn reset_quick_craft(&mut self) {
+        self.quickcraft_status = 0;
+        self.drag_slots.clear();
     }
 
     pub fn next_revision(&self) -> u32 {

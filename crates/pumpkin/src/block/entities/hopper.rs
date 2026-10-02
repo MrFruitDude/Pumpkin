@@ -23,6 +23,8 @@ pub struct HopperBlockEntity {
     pub items: RwLock<[ItemStack; Self::INVENTORY_SIZE]>,
     pub dirty: AtomicBool,
     pub comparator_dirty: AtomicBool,
+    /// `CustomName` and `lock`.
+    pub name: super::container_name::ContainerName,
     pub facing: FacingHopper,
     pub cooldown_time: AtomicI32,
     pub ticked_game_time: AtomicI64,
@@ -58,7 +60,20 @@ struct Extraction {
 }
 
 impl BlockEntity for HopperBlockEntity {
+    fn custom_name(&self) -> Option<pumpkin_util::text::TextComponent> {
+        self.name.custom_name()
+    }
+
+    fn apply_item_components(&self, stack: &ItemStack) {
+        self.name.apply_item_components(stack);
+    }
+
+    fn collect_item_components(&self, stack: &mut ItemStack) {
+        self.name.collect_custom_name(stack);
+    }
+
     fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.name.write_nbt(nbt);
         nbt.put(
             "TransferCooldown",
             NbtTag::Int(self.cooldown_time.load(Ordering::Relaxed)),
@@ -75,6 +90,7 @@ impl BlockEntity for HopperBlockEntity {
             items: RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
             dirty: AtomicBool::new(false),
             comparator_dirty: AtomicBool::new(false),
+            name: super::container_name::ContainerName::from_nbt(nbt),
             facing: FacingHopper::Down,
             cooldown_time: AtomicI32::from(nbt.get_int("TransferCooldown").unwrap_or(-1)),
             ticked_game_time: AtomicI64::new(0),
@@ -173,6 +189,7 @@ impl HopperBlockEntity {
             items: RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
             dirty: AtomicBool::new(false),
             comparator_dirty: AtomicBool::new(false),
+            name: super::container_name::ContainerName::new(),
             facing,
             cooldown_time: AtomicI32::new(-1),
             ticked_game_time: AtomicI64::new(0),
