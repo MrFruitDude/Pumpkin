@@ -1,0 +1,29 @@
+[package]
+name = "mc-load-harness"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0"
+publish = false
+description = "Bot load-test harness that compares Minecraft Java servers (vanilla, NeoForge, Pumpkin) under the same scenario"
+
+# Standalone workspace: the harness pulls in azalea (and its Bevy ECS stack), which must not
+# end up in Pumpkin's own Cargo.lock or CI package graph.
+[workspace]
+
+[dependencies]
+# azalea has no crates.io release for MC 26.3 yet (0.16.0 is mc26.1); its `26.3` branch speaks
+# protocol 777. Pinned to an exact commit so every run uses the same client.
+azalea = { git = "https://github.com/azalea-rs/azalea", rev = "8041a14706fbdb2b8c481d2e8960d7411e850796", default-features = false, features = ["packet-event"] }
+clap = { version = "=4.6.7", features = ["derive"] }
+eyre = "=0.6.14"
+# proc_pid_rusage (macOS process footprint); already in the lock file through tokio.
+libc = "=0.2.189"
+parking_lot = "=0.12.5"
+regex = "=1.13.1"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+sysinfo = { version = "=0.39.6", default-features = false, features = ["system"] }
+tokio = { version = "=1.53.1", features = ["macros", "rt-multi-thread", "process", "io-util", "time", "sync", "signal", "fs"] }
+
+[profile.release]
+debug = false

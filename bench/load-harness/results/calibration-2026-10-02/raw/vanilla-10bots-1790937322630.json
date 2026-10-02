@@ -1,0 +1,1193 @@
+{
+  "schema": 2,
+  "target": "vanilla",
+  "label": "vanilla 26.3",
+  "started_at_ms": 1790937322630,
+  "host": {
+    "os": "macOS 27.0",
+    "cpu": "Apple M4 Max",
+    "logical_cpus": 14,
+    "total_mem_mb": 36864
+  },
+  "params": {
+    "bots": 10,
+    "warmup_secs": 60,
+    "measure_secs": 120,
+    "seed": 20250101,
+    "view_distance": 8,
+    "simulation_distance": 8,
+    "java_heap": "2G",
+    "join_delay_ms": 250,
+    "java_pretouch": true,
+    "server_cpus": null,
+    "bots_cpus": null
+  },
+  "server_ready_secs": 5.918750417,
+  "bots_all_joined_secs": 8.970456667,
+  "pre_run_host_busy_pct": 680.3474914550782,
+  "work": {
+    "bots_online_start": 10,
+    "bots_online_end": 10,
+    "disconnects": 0,
+    "client_ticks": 24200,
+    "places_sent": 240,
+    "places_confirmed": 213,
+    "breaks_sent": 213,
+    "breaks_confirmed": 151,
+    "chats_sent": 121,
+    "chats_echoed": 121
+  },
+  "summary": {
+    "mspt_mean": 5.120833333333334,
+    "mspt_p50_mean": 4.154166666666667,
+    "mspt_p95_mean": 10.704166666666667,
+    "mspt_p99_max": 176.4,
+    "tick_queries": 24,
+    "tps_client": 19.999338864830914,
+    "cpu_pct_mean": 22.860299813764616,
+    "cpu_pct_p95": 31.94236135052216,
+    "rss_mb_mean": 1234.3252604166667,
+    "rss_mb_peak": 1548.25,
+    "footprint_mb_mean": 2453.2626037597656,
+    "footprint_mb_peak": 2458.4715881347656,
+    "java_live_heap_mb": 256.755859375,
+    "host_available_mb_min": 14680.5,
+    "bot_cpu_pct_mean": 9.24730044997994,
+    "host_other_cpu_pct_mean": 791.7478740175662,
+    "chat_rtt_ms_p50": 40.0,
+    "chat_rtt_ms_p99": 49.0
+  },
+  "invalid_reasons": [],
+  "tick_queries": [
+    {
+      "at_ms": 1790937391641,
+      "mspt_avg": 4.9,
+      "p50": 4.2,
+      "p95": 8.7,
+      "p99": 11.6
+    },
+    {
+      "at_ms": 1790937396647,
+      "mspt_avg": 4.9,
+      "p50": 4.1,
+      "p95": 10.2,
+      "p99": 16.4
+    },
+    {
+      "at_ms": 1790937401637,
+      "mspt_avg": 4.5,
+      "p50": 4.1,
+      "p95": 8.1,
+      "p99": 17.2
+    },
+    {
+      "at_ms": 1790937406637,
+      "mspt_avg": 4.4,
+      "p50": 3.9,
+      "p95": 7.2,
+      "p99": 14.6
+    },
+    {
+      "at_ms": 1790937411637,
+      "mspt_avg": 4.4,
+      "p50": 4.0,
+      "p95": 7.7,
+      "p99": 11.7
+    },
+    {
+      "at_ms": 1790937416630,
+      "mspt_avg": 4.2,
+      "p50": 4.0,
+      "p95": 6.8,
+      "p99": 8.6
+    },
+    {
+      "at_ms": 1790937421635,
+      "mspt_avg": 4.8,
+      "p50": 4.1,
+      "p95": 9.7,
+      "p99": 11.4
+    },
+    {
+      "at_ms": 1790937426633,
+      "mspt_avg": 4.7,
+      "p50": 4.2,
+      "p95": 9.4,
+      "p99": 13.5
+    },
+    {
+      "at_ms": 1790937431632,
+      "mspt_avg": 4.7,
+      "p50": 4.2,
+      "p95": 7.7,
+      "p99": 9.0
+    },
+    {
+      "at_ms": 1790937436638,
+      "mspt_avg": 4.6,
+      "p50": 4.2,
+      "p95": 8.5,
+      "p99": 11.1
+    },
+    {
+      "at_ms": 1790937441629,
+      "mspt_avg": 4.7,
+      "p50": 4.2,
+      "p95": 8.8,
+      "p99": 12.4
+    },
+    {
+      "at_ms": 1790937446636,
+      "mspt_avg": 4.7,
+      "p50": 4.1,
+      "p95": 7.7,
+      "p99": 26.7
+    },
+    {
+      "at_ms": 1790937451636,
+      "mspt_avg": 4.2,
+      "p50": 3.8,
+      "p95": 7.5,
+      "p99": 9.9
+    },
+    {
+      "at_ms": 1790937456638,
+      "mspt_avg": 4.9,
+      "p50": 4.1,
+      "p95": 10.8,
+      "p99": 15.8
+    },
+    {
+      "at_ms": 1790937461636,
+      "mspt_avg": 4.6,
+      "p50": 3.9,
+      "p95": 10.0,
+      "p99": 11.7
+    },
+    {
+      "at_ms": 1790937466637,
+      "mspt_avg": 5.3,
+      "p50": 4.2,
+      "p95": 9.0,
+      "p99": 44.7
+    },
+    {
+      "at_ms": 1790937471638,
+      "mspt_avg": 4.5,
+      "p50": 4.1,
+      "p95": 7.9,
+      "p99": 11.2
+    },
+    {
+      "at_ms": 1790937476641,
+      "mspt_avg": 4.6,
+      "p50": 4.3,
+      "p95": 8.9,
+      "p99": 12.8
+    },
+    {
+      "at_ms": 1790937481698,
+      "mspt_avg": 9.6,
+      "p50": 4.4,
+      "p95": 42.8,
+      "p99": 125.4
+    },
+    {
+      "at_ms": 1790937486651,
+      "mspt_avg": 8.3,
+      "p50": 4.3,
+      "p95": 15.8,
+      "p99": 176.4
+    },
+    {
+      "at_ms": 1790937491634,
+      "mspt_avg": 5.5,
+      "p50": 4.5,
+      "p95": 10.7,
+      "p99": 16.6
+    },
+    {
+      "at_ms": 1790937496637,
+      "mspt_avg": 5.7,
+      "p50": 4.4,
+      "p95": 13.0,
+      "p99": 16.1
+    },
+    {
+      "at_ms": 1790937501628,
+      "mspt_avg": 4.5,
+      "p50": 4.1,
+      "p95": 8.6,
+      "p99": 11.0
+    },
+    {
+      "at_ms": 1790937506638,
+      "mspt_avg": 5.7,
+      "p50": 4.3,
+      "p95": 11.4,
+      "p99": 15.6
+    }
+  ],
+  "samples": [
+    {
+      "at_ms": 1790937392609,
+      "cpu_pct": 22.123834099355477,
+      "rss_mb": 1392.796875,
+      "footprint_mb": 2442.1122131347656,
+      "host_other_cpu_pct": 690.9916839944901,
+      "host_available_mb": 16407.71875
+    },
+    {
+      "at_ms": 1790937393610,
+      "cpu_pct": 29.47794065475806,
+      "rss_mb": 1427.6875,
+      "footprint_mb": 2442.2528381347656,
+      "host_other_cpu_pct": 712.0414878434935,
+      "host_available_mb": 16282.15625
+    },
+    {
+      "at_ms": 1790937394609,
+      "cpu_pct": 31.72049807133818,
+      "rss_mb": 1406.296875,
+      "footprint_mb": 2442.4403381347656,
+      "host_other_cpu_pct": 689.2860129024752,
+      "host_available_mb": 16259.203125
+    },
+    {
+      "at_ms": 1790937395610,
+      "cpu_pct": 22.68955996622054,
+      "rss_mb": 1273.5,
+      "footprint_mb": 2442.5184631347656,
+      "host_other_cpu_pct": 1140.8934416902785,
+      "host_available_mb": 15750.671875
+    },
+    {
+      "at_ms": 1790937396609,
+      "cpu_pct": 17.017408809211823,
+      "rss_mb": 1227.96875,
+      "footprint_mb": 2442.5184631347656,
+      "host_other_cpu_pct": 969.3364983038105,
+      "host_available_mb": 15887.40625
+    },
+    {
+      "at_ms": 1790937397610,
+      "cpu_pct": 21.778992332459985,
+      "rss_mb": 1186.015625,
+      "footprint_mb": 2442.5653381347656,
+      "host_other_cpu_pct": 1317.2566264267562,
+      "host_available_mb": 15980.09375
+    },
+    {
+      "at_ms": 1790937398609,
+      "cpu_pct": 22.21109166389966,
+      "rss_mb": 1209.96875,
+      "footprint_mb": 2442.7059631347656,
+      "host_other_cpu_pct": 656.8106764649932,
+      "host_available_mb": 15765.109375
+    },
+    {
+      "at_ms": 1790937399608,
+      "cpu_pct": 27.432317574417343,
+      "rss_mb": 1259.921875,
+      "footprint_mb": 2442.7059631347656,
+      "host_other_cpu_pct": 686.0439591532058,
+      "host_available_mb": 15544.75
+    },
+    {
+      "at_ms": 1790937400610,
+      "cpu_pct": 21.868553020756153,
+      "rss_mb": 1264.234375,
+      "footprint_mb": 2442.7997131347656,
+      "host_other_cpu_pct": 743.871455849781,
+      "host_available_mb": 15833.390625
+    },
+    {
+      "at_ms": 1790937401609,
+      "cpu_pct": 33.036543901621485,
+      "rss_mb": 1294.828125,
+      "footprint_mb": 2444.1747131347656,
+      "host_other_cpu_pct": 788.5291334757653,
+      "host_available_mb": 16264.765625
+    },
+    {
+      "at_ms": 1790937402609,
+      "cpu_pct": 19.586915137624548,
+      "rss_mb": 1253.0625,
+      "footprint_mb": 2444.2840881347656,
+      "host_other_cpu_pct": 933.607775349689,
+      "host_available_mb": 16645.453125
+    },
+    {
+      "at_ms": 1790937403608,
+      "cpu_pct": 27.826481516358747,
+      "rss_mb": 1272.9375,
+      "footprint_mb": 2444.2840881347656,
+      "host_other_cpu_pct": 720.6149562078982,
+      "host_available_mb": 16584.125
+    },
+    {
+      "at_ms": 1790937404610,
+      "cpu_pct": 30.348700589885798,
+      "rss_mb": 1291.015625,
+      "footprint_mb": 2444.3309631347656,
+      "host_other_cpu_pct": 675.5414631712524,
+      "host_available_mb": 16719.078125
+    },
+    {
+      "at_ms": 1790937405610,
+      "cpu_pct": 19.497888534654805,
+      "rss_mb": 1292.0,
+      "footprint_mb": 2444.3309631347656,
+      "host_other_cpu_pct": 638.907945152227,
+      "host_available_mb": 16947.4375
+    },
+    {
+      "at_ms": 1790937406609,
+      "cpu_pct": 20.113801426783613,
+      "rss_mb": 1293.109375,
+      "footprint_mb": 2444.3309631347656,
+      "host_other_cpu_pct": 616.9836484311902,
+      "host_available_mb": 16953.125
+    },
+    {
+      "at_ms": 1790937407608,
+      "cpu_pct": 28.4429239275722,
+      "rss_mb": 1304.796875,
+      "footprint_mb": 2444.5965881347656,
+      "host_other_cpu_pct": 673.2166029842706,
+      "host_available_mb": 17043.21875
+    },
+    {
+      "at_ms": 1790937408608,
+      "cpu_pct": 16.394511248789996,
+      "rss_mb": 1331.984375,
+      "footprint_mb": 2444.5965881347656,
+      "host_other_cpu_pct": 717.8366237571429,
+      "host_available_mb": 16913.015625
+    },
+    {
+      "at_ms": 1790937409610,
+      "cpu_pct": 21.260924207224754,
+      "rss_mb": 1334.390625,
+      "footprint_mb": 2444.5965881347656,
+      "host_other_cpu_pct": 729.4471627525476,
+      "host_available_mb": 17198.359375
+    },
+    {
+      "at_ms": 1790937410609,
+      "cpu_pct": 19.31820741048438,
+      "rss_mb": 1336.953125,
+      "footprint_mb": 2444.5965881347656,
+      "host_other_cpu_pct": 788.3251463980758,
+      "host_available_mb": 17210.109375
+    },
+    {
+      "at_ms": 1790937411610,
+      "cpu_pct": 22.79299115521977,
+      "rss_mb": 1352.609375,
+      "footprint_mb": 2444.6747131347656,
+      "host_other_cpu_pct": 767.329703377364,
+      "host_available_mb": 17743.46875
+    },
+    {
+      "at_ms": 1790937412609,
+      "cpu_pct": 26.500745333462504,
+      "rss_mb": 1390.109375,
+      "footprint_mb": 2444.6903381347656,
+      "host_other_cpu_pct": 659.2532110326371,
+      "host_available_mb": 17778.796875
+    },
+    {
+      "at_ms": 1790937413608,
+      "cpu_pct": 25.13478443032968,
+      "rss_mb": 1426.234375,
+      "footprint_mb": 2444.7684631347656,
+      "host_other_cpu_pct": 764.5726845190032,
+      "host_available_mb": 17800.0625
+    },
+    {
+      "at_ms": 1790937414610,
+      "cpu_pct": 31.94236135052216,
+      "rss_mb": 1448.109375,
+      "footprint_mb": 2444.8622131347656,
+      "host_other_cpu_pct": 722.7471506266115,
+      "host_available_mb": 17688.1875
+    },
+    {
+      "at_ms": 1790937415609,
+      "cpu_pct": 21.831089283119574,
+      "rss_mb": 1466.046875,
+      "footprint_mb": 2444.8778381347656,
+      "host_other_cpu_pct": 705.9098490328275,
+      "host_available_mb": 17967.46875
+    },
+    {
+      "at_ms": 1790937416609,
+      "cpu_pct": 18.98421858994415,
+      "rss_mb": 1462.890625,
+      "footprint_mb": 2444.9872131347656,
+      "host_other_cpu_pct": 822.0532213332176,
+      "host_available_mb": 17995.21875
+    },
+    {
+      "at_ms": 1790937417610,
+      "cpu_pct": 20.880229033134253,
+      "rss_mb": 1490.96875,
+      "footprint_mb": 2445.0028381347656,
+      "host_other_cpu_pct": 711.1089486138958,
+      "host_available_mb": 18100.34375
+    },
+    {
+      "at_ms": 1790937418610,
+      "cpu_pct": 22.706548932016776,
+      "rss_mb": 1529.953125,
+      "footprint_mb": 2444.9247131347656,
+      "host_other_cpu_pct": 873.9288141328537,
+      "host_available_mb": 17948.109375
+    },
+    {
+      "at_ms": 1790937419610,
+      "cpu_pct": 20.007875600033064,
+      "rss_mb": 1537.390625,
+      "footprint_mb": 2444.9403381347656,
+      "host_other_cpu_pct": 746.5089916806465,
+      "host_available_mb": 17961.796875
+    },
+    {
+      "at_ms": 1790937420610,
+      "cpu_pct": 26.38566050171506,
+      "rss_mb": 1506.421875,
+      "footprint_mb": 2445.0809631347656,
+      "host_other_cpu_pct": 788.2104223973136,
+      "host_available_mb": 18222.890625
+    },
+    {
+      "at_ms": 1790937421610,
+      "cpu_pct": 20.814219587953247,
+      "rss_mb": 1516.6875,
+      "footprint_mb": 2445.0809631347656,
+      "host_other_cpu_pct": 663.4996346710002,
+      "host_available_mb": 18234.015625
+    },
+    {
+      "at_ms": 1790937422609,
+      "cpu_pct": 22.90596031412142,
+      "rss_mb": 1295.984375,
+      "footprint_mb": 2445.1122131347656,
+      "host_other_cpu_pct": 675.7460488023543,
+      "host_available_mb": 17628.390625
+    },
+    {
+      "at_ms": 1790937423608,
+      "cpu_pct": 28.93445491744005,
+      "rss_mb": 1238.21875,
+      "footprint_mb": 2449.3309631347656,
+      "host_other_cpu_pct": 635.5414153432598,
+      "host_available_mb": 17471.53125
+    },
+    {
+      "at_ms": 1790937424609,
+      "cpu_pct": 28.664414304881475,
+      "rss_mb": 1201.09375,
+      "footprint_mb": 2451.0653381347656,
+      "host_other_cpu_pct": 727.3778975151769,
+      "host_available_mb": 17598.671875
+    },
+    {
+      "at_ms": 1790937425610,
+      "cpu_pct": 21.0966843185124,
+      "rss_mb": 1198.8125,
+      "footprint_mb": 2451.0653381347656,
+      "host_other_cpu_pct": 708.5098255993977,
+      "host_available_mb": 17537.859375
+    },
+    {
+      "at_ms": 1790937426610,
+      "cpu_pct": 18.394312313083983,
+      "rss_mb": 1210.734375,
+      "footprint_mb": 2451.0653381347656,
+      "host_other_cpu_pct": 723.1371204911609,
+      "host_available_mb": 17612.4375
+    },
+    {
+      "at_ms": 1790937427610,
+      "cpu_pct": 27.205975112284037,
+      "rss_mb": 1244.890625,
+      "footprint_mb": 2451.0653381347656,
+      "host_other_cpu_pct": 634.6230409127676,
+      "host_available_mb": 17616.328125
+    },
+    {
+      "at_ms": 1790937428610,
+      "cpu_pct": 22.495361276541885,
+      "rss_mb": 1252.484375,
+      "footprint_mb": 2451.0965881347656,
+      "host_other_cpu_pct": 620.6104732741477,
+      "host_available_mb": 17645.1875
+    },
+    {
+      "at_ms": 1790937429610,
+      "cpu_pct": 22.685911096400872,
+      "rss_mb": 1225.78125,
+      "footprint_mb": 2451.1590881347656,
+      "host_other_cpu_pct": 646.5610069244564,
+      "host_available_mb": 17421.40625
+    },
+    {
+      "at_ms": 1790937430610,
+      "cpu_pct": 21.00512964170467,
+      "rss_mb": 1257.375,
+      "footprint_mb": 2451.1590881347656,
+      "host_other_cpu_pct": 660.3723594065609,
+      "host_available_mb": 17622.515625
+    },
+    {
+      "at_ms": 1790937431609,
+      "cpu_pct": 21.229532041120358,
+      "rss_mb": 1263.265625,
+      "footprint_mb": 2452.9559631347656,
+      "host_other_cpu_pct": 649.0142890965825,
+      "host_available_mb": 17640.265625
+    },
+    {
+      "at_ms": 1790937432610,
+      "cpu_pct": 21.684668939060085,
+      "rss_mb": 976.078125,
+      "footprint_mb": 2452.9559631347656,
+      "host_other_cpu_pct": 684.7986225956157,
+      "host_available_mb": 16710.609375
+    },
+    {
+      "at_ms": 1790937433610,
+      "cpu_pct": 27.99573182671716,
+      "rss_mb": 1029.0,
+      "footprint_mb": 2453.0497131347656,
+      "host_other_cpu_pct": 644.2162378324955,
+      "host_available_mb": 17118.40625
+    },
+    {
+      "at_ms": 1790937434610,
+      "cpu_pct": 26.202157302217167,
+      "rss_mb": 1036.4375,
+      "footprint_mb": 2453.0497131347656,
+      "host_other_cpu_pct": 633.9070807462131,
+      "host_available_mb": 16898.34375
+    },
+    {
+      "at_ms": 1790937435610,
+      "cpu_pct": 42.38960572955827,
+      "rss_mb": 1083.703125,
+      "footprint_mb": 2454.5497131347656,
+      "host_other_cpu_pct": 643.0570414117008,
+      "host_available_mb": 17181.71875
+    },
+    {
+      "at_ms": 1790937436610,
+      "cpu_pct": 19.796270877473454,
+      "rss_mb": 1122.578125,
+      "footprint_mb": 2454.5497131347656,
+      "host_other_cpu_pct": 625.4246933443618,
+      "host_available_mb": 17179.828125
+    },
+    {
+      "at_ms": 1790937437609,
+      "cpu_pct": 21.724061200877053,
+      "rss_mb": 1120.5625,
+      "footprint_mb": 2454.5653381347656,
+      "host_other_cpu_pct": 693.8217127054695,
+      "host_available_mb": 17191.109375
+    },
+    {
+      "at_ms": 1790937438610,
+      "cpu_pct": 18.78060277369544,
+      "rss_mb": 1149.90625,
+      "footprint_mb": 2454.5653381347656,
+      "host_other_cpu_pct": 638.8625944685327,
+      "host_available_mb": 16952.765625
+    },
+    {
+      "at_ms": 1790937439609,
+      "cpu_pct": 22.932325015492314,
+      "rss_mb": 1143.015625,
+      "footprint_mb": 2454.6903381347656,
+      "host_other_cpu_pct": 719.7639394791208,
+      "host_available_mb": 17317.6875
+    },
+    {
+      "at_ms": 1790937440608,
+      "cpu_pct": 21.103548920511315,
+      "rss_mb": 1176.0625,
+      "footprint_mb": 2454.6903381347656,
+      "host_other_cpu_pct": 707.205694973427,
+      "host_available_mb": 17388.75
+    },
+    {
+      "at_ms": 1790937441610,
+      "cpu_pct": 17.077752657912765,
+      "rss_mb": 1137.140625,
+      "footprint_mb": 2454.6903381347656,
+      "host_other_cpu_pct": 767.9996024603411,
+      "host_available_mb": 17468.0
+    },
+    {
+      "at_ms": 1790937442609,
+      "cpu_pct": 36.82060573148248,
+      "rss_mb": 1195.703125,
+      "footprint_mb": 2456.2840881347656,
+      "host_other_cpu_pct": 662.6529375814763,
+      "host_available_mb": 17537.09375
+    },
+    {
+      "at_ms": 1790937443610,
+      "cpu_pct": 25.18961034369686,
+      "rss_mb": 1263.28125,
+      "footprint_mb": 2456.2997131347656,
+      "host_other_cpu_pct": 613.412790258593,
+      "host_available_mb": 17574.796875
+    },
+    {
+      "at_ms": 1790937444610,
+      "cpu_pct": 36.49118737824815,
+      "rss_mb": 1331.640625,
+      "footprint_mb": 2456.3934631347656,
+      "host_other_cpu_pct": 655.8210902552664,
+      "host_available_mb": 17147.6875
+    },
+    {
+      "at_ms": 1790937445611,
+      "cpu_pct": 22.086449035885625,
+      "rss_mb": 1283.0625,
+      "footprint_mb": 2456.3934631347656,
+      "host_other_cpu_pct": 634.4023366615145,
+      "host_available_mb": 17139.0
+    },
+    {
+      "at_ms": 1790937446608,
+      "cpu_pct": 18.53780167342499,
+      "rss_mb": 1262.03125,
+      "footprint_mb": 2456.3934631347656,
+      "host_other_cpu_pct": 855.8825419363332,
+      "host_available_mb": 17241.25
+    },
+    {
+      "at_ms": 1790937447609,
+      "cpu_pct": 12.99249953395904,
+      "rss_mb": 1188.6875,
+      "footprint_mb": 2456.3934631347656,
+      "host_other_cpu_pct": 1343.4020727934985,
+      "host_available_mb": 17167.40625
+    },
+    {
+      "at_ms": 1790937448611,
+      "cpu_pct": 19.059103147996957,
+      "rss_mb": 1197.65625,
+      "footprint_mb": 2456.4715881347656,
+      "host_other_cpu_pct": 1349.5679980727982,
+      "host_available_mb": 17097.9375
+    },
+    {
+      "at_ms": 1790937449611,
+      "cpu_pct": 13.808252156695143,
+      "rss_mb": 1096.875,
+      "footprint_mb": 2456.5340881347656,
+      "host_other_cpu_pct": 1352.077331270791,
+      "host_available_mb": 16888.8125
+    },
+    {
+      "at_ms": 1790937450610,
+      "cpu_pct": 15.007240363171137,
+      "rss_mb": 1002.34375,
+      "footprint_mb": 2456.5497131347656,
+      "host_other_cpu_pct": 1344.4951996124164,
+      "host_available_mb": 17034.171875
+    },
+    {
+      "at_ms": 1790937451610,
+      "cpu_pct": 19.0069438638226,
+      "rss_mb": 1013.328125,
+      "footprint_mb": 2456.5497131347656,
+      "host_other_cpu_pct": 823.6597166338805,
+      "host_available_mb": 17031.234375
+    },
+    {
+      "at_ms": 1790937452614,
+      "cpu_pct": 20.713272678052814,
+      "rss_mb": 1054.859375,
+      "footprint_mb": 2456.6434631347656,
+      "host_other_cpu_pct": 620.819690873664,
+      "host_available_mb": 17058.625
+    },
+    {
+      "at_ms": 1790937453609,
+      "cpu_pct": 33.967893378344286,
+      "rss_mb": 1024.0,
+      "footprint_mb": 2456.6590881347656,
+      "host_other_cpu_pct": 627.9132094039202,
+      "host_available_mb": 16565.25
+    },
+    {
+      "at_ms": 1790937454609,
+      "cpu_pct": 27.696578309322504,
+      "rss_mb": 1071.484375,
+      "footprint_mb": 2456.7528381347656,
+      "host_other_cpu_pct": 741.2387892854518,
+      "host_available_mb": 16901.703125
+    },
+    {
+      "at_ms": 1790937455608,
+      "cpu_pct": 16.114066242362085,
+      "rss_mb": 1033.796875,
+      "footprint_mb": 2456.7684631347656,
+      "host_other_cpu_pct": 1328.475982147573,
+      "host_available_mb": 16976.0
+    },
+    {
+      "at_ms": 1790937456611,
+      "cpu_pct": 14.664616114392985,
+      "rss_mb": 1054.234375,
+      "footprint_mb": 2456.7684631347656,
+      "host_other_cpu_pct": 1264.6976384452146,
+      "host_available_mb": 16578.625
+    },
+    {
+      "at_ms": 1790937457609,
+      "cpu_pct": 15.332889692371504,
+      "rss_mb": 1096.71875,
+      "footprint_mb": 2456.8465881347656,
+      "host_other_cpu_pct": 1245.6677883219927,
+      "host_available_mb": 16970.984375
+    },
+    {
+      "at_ms": 1790937458610,
+      "cpu_pct": 14.981394980109075,
+      "rss_mb": 1132.75,
+      "footprint_mb": 2456.8934631347656,
+      "host_other_cpu_pct": 1288.5038510385907,
+      "host_available_mb": 16979.140625
+    },
+    {
+      "at_ms": 1790937459610,
+      "cpu_pct": 17.901397042926625,
+      "rss_mb": 1176.6875,
+      "footprint_mb": 2456.9247131347656,
+      "host_other_cpu_pct": 710.1451012657595,
+      "host_available_mb": 16832.34375
+    },
+    {
+      "at_ms": 1790937460610,
+      "cpu_pct": 21.598135368179257,
+      "rss_mb": 1224.859375,
+      "footprint_mb": 2456.9403381347656,
+      "host_other_cpu_pct": 637.0500099606498,
+      "host_available_mb": 17106.0
+    },
+    {
+      "at_ms": 1790937461610,
+      "cpu_pct": 23.405940240385487,
+      "rss_mb": 1266.25,
+      "footprint_mb": 2456.9403381347656,
+      "host_other_cpu_pct": 616.307464322419,
+      "host_available_mb": 17148.75
+    },
+    {
+      "at_ms": 1790937462610,
+      "cpu_pct": 21.793500981865694,
+      "rss_mb": 1214.484375,
+      "footprint_mb": 2456.9403381347656,
+      "host_other_cpu_pct": 675.7110738239251,
+      "host_available_mb": 16551.328125
+    },
+    {
+      "at_ms": 1790937463609,
+      "cpu_pct": 22.120074897012184,
+      "rss_mb": 1184.03125,
+      "footprint_mb": 2457.0028381347656,
+      "host_other_cpu_pct": 1285.9812539014297,
+      "host_available_mb": 16689.28125
+    },
+    {
+      "at_ms": 1790937464610,
+      "cpu_pct": 25.079269901846722,
+      "rss_mb": 1220.96875,
+      "footprint_mb": 2457.0653381347656,
+      "host_other_cpu_pct": 1330.3155905927129,
+      "host_available_mb": 15756.96875
+    },
+    {
+      "at_ms": 1790937465608,
+      "cpu_pct": 19.634181460651753,
+      "rss_mb": 1233.734375,
+      "footprint_mb": 2457.0809631347656,
+      "host_other_cpu_pct": 1011.736269963602,
+      "host_available_mb": 15996.03125
+    },
+    {
+      "at_ms": 1790937466610,
+      "cpu_pct": 24.948646330110257,
+      "rss_mb": 1256.46875,
+      "footprint_mb": 2457.1434631347656,
+      "host_other_cpu_pct": 680.7934172718498,
+      "host_available_mb": 16123.46875
+    },
+    {
+      "at_ms": 1790937467611,
+      "cpu_pct": 22.393018058506524,
+      "rss_mb": 1284.5,
+      "footprint_mb": 2457.1590881347656,
+      "host_other_cpu_pct": 658.288372508826,
+      "host_available_mb": 16183.25
+    },
+    {
+      "at_ms": 1790937468610,
+      "cpu_pct": 25.221226815018188,
+      "rss_mb": 1307.171875,
+      "footprint_mb": 2457.2528381347656,
+      "host_other_cpu_pct": 623.0027333980257,
+      "host_available_mb": 16052.375
+    },
+    {
+      "at_ms": 1790937469610,
+      "cpu_pct": 16.098353943309295,
+      "rss_mb": 1311.4375,
+      "footprint_mb": 2457.2528381347656,
+      "host_other_cpu_pct": 1229.8864535369182,
+      "host_available_mb": 16235.171875
+    },
+    {
+      "at_ms": 1790937470610,
+      "cpu_pct": 19.39826222607674,
+      "rss_mb": 1315.640625,
+      "footprint_mb": 2457.3153381347656,
+      "host_other_cpu_pct": 1231.0320429460646,
+      "host_available_mb": 16278.59375
+    },
+    {
+      "at_ms": 1790937471609,
+      "cpu_pct": 23.424638831560756,
+      "rss_mb": 1336.390625,
+      "footprint_mb": 2457.2684631347656,
+      "host_other_cpu_pct": 631.3892159328833,
+      "host_available_mb": 16279.984375
+    },
+    {
+      "at_ms": 1790937472610,
+      "cpu_pct": 23.18032375306739,
+      "rss_mb": 1379.25,
+      "footprint_mb": 2457.2684631347656,
+      "host_other_cpu_pct": 633.7145094979811,
+      "host_available_mb": 16289.953125
+    },
+    {
+      "at_ms": 1790937473610,
+      "cpu_pct": 25.50392122788879,
+      "rss_mb": 1427.015625,
+      "footprint_mb": 2457.2997131347656,
+      "host_other_cpu_pct": 644.7354015988425,
+      "host_available_mb": 16352.859375
+    },
+    {
+      "at_ms": 1790937474609,
+      "cpu_pct": 25.50917588014667,
+      "rss_mb": 1469.171875,
+      "footprint_mb": 2457.3309631347656,
+      "host_other_cpu_pct": 701.0973732030137,
+      "host_available_mb": 16147.953125
+    },
+    {
+      "at_ms": 1790937475610,
+      "cpu_pct": 22.472130804956013,
+      "rss_mb": 1504.296875,
+      "footprint_mb": 2457.3934631347656,
+      "host_other_cpu_pct": 984.2639125358445,
+      "host_available_mb": 16432.296875
+    },
+    {
+      "at_ms": 1790937476609,
+      "cpu_pct": 21.92497072187965,
+      "rss_mb": 1532.15625,
+      "footprint_mb": 2457.4403381347656,
+      "host_other_cpu_pct": 704.7313567478415,
+      "host_available_mb": 16419.09375
+    },
+    {
+      "at_ms": 1790937477610,
+      "cpu_pct": 27.491405499355764,
+      "rss_mb": 1545.78125,
+      "footprint_mb": 2457.5340881347656,
+      "host_other_cpu_pct": 612.8186583907097,
+      "host_available_mb": 16438.15625
+    },
+    {
+      "at_ms": 1790937478610,
+      "cpu_pct": 31.88761166286898,
+      "rss_mb": 1548.25,
+      "footprint_mb": 2457.5497131347656,
+      "host_other_cpu_pct": 603.4303012729944,
+      "host_available_mb": 16206.71875
+    },
+    {
+      "at_ms": 1790937479609,
+      "cpu_pct": 20.41588184113833,
+      "rss_mb": 1468.953125,
+      "footprint_mb": 2457.6278381347656,
+      "host_other_cpu_pct": 1016.5184834203762,
+      "host_available_mb": 16099.84375
+    },
+    {
+      "at_ms": 1790937480610,
+      "cpu_pct": 20.48351333220674,
+      "rss_mb": 1100.0,
+      "footprint_mb": 2457.6278381347656,
+      "host_other_cpu_pct": 1369.5252797691255,
+      "host_available_mb": 16046.671875
+    },
+    {
+      "at_ms": 1790937481611,
+      "cpu_pct": 14.093666658545315,
+      "rss_mb": 1001.03125,
+      "footprint_mb": 2457.7215881347656,
+      "host_other_cpu_pct": 1376.1107123856425,
+      "host_available_mb": 15341.15625
+    },
+    {
+      "at_ms": 1790937482610,
+      "cpu_pct": 16.205461240438026,
+      "rss_mb": 1022.21875,
+      "footprint_mb": 2457.7684631347656,
+      "host_other_cpu_pct": 1374.1912824586057,
+      "host_available_mb": 15231.328125
+    },
+    {
+      "at_ms": 1790937483611,
+      "cpu_pct": 24.49348576151384,
+      "rss_mb": 1067.0625,
+      "footprint_mb": 2457.7684631347656,
+      "host_other_cpu_pct": 790.457123671291,
+      "host_available_mb": 15064.3125
+    },
+    {
+      "at_ms": 1790937484611,
+      "cpu_pct": 26.290197042777674,
+      "rss_mb": 1100.03125,
+      "footprint_mb": 2457.7997131347656,
+      "host_other_cpu_pct": 622.2501308566206,
+      "host_available_mb": 15202.625
+    },
+    {
+      "at_ms": 1790937485610,
+      "cpu_pct": 34.02357551387434,
+      "rss_mb": 1178.15625,
+      "footprint_mb": 2457.9559631347656,
+      "host_other_cpu_pct": 921.540391843141,
+      "host_available_mb": 15236.03125
+    },
+    {
+      "at_ms": 1790937486610,
+      "cpu_pct": 21.19929777326126,
+      "rss_mb": 1185.8125,
+      "footprint_mb": 2457.9715881347656,
+      "host_other_cpu_pct": 669.6409529675309,
+      "host_available_mb": 15273.796875
+    },
+    {
+      "at_ms": 1790937487609,
+      "cpu_pct": 22.732830936300854,
+      "rss_mb": 1210.015625,
+      "footprint_mb": 2458.0340881347656,
+      "host_other_cpu_pct": 597.3402590292949,
+      "host_available_mb": 15322.5
+    },
+    {
+      "at_ms": 1790937488610,
+      "cpu_pct": 22.877354278933144,
+      "rss_mb": 1236.453125,
+      "footprint_mb": 2458.0497131347656,
+      "host_other_cpu_pct": 621.8265825270684,
+      "host_available_mb": 15491.875
+    },
+    {
+      "at_ms": 1790937489610,
+      "cpu_pct": 21.19476489307141,
+      "rss_mb": 1057.546875,
+      "footprint_mb": 2458.0497131347656,
+      "host_other_cpu_pct": 718.3406163329342,
+      "host_available_mb": 14837.40625
+    },
+    {
+      "at_ms": 1790937490609,
+      "cpu_pct": 18.827182535527335,
+      "rss_mb": 1063.1875,
+      "footprint_mb": 2458.0497131347656,
+      "host_other_cpu_pct": 680.9920472242568,
+      "host_available_mb": 15303.328125
+    },
+    {
+      "at_ms": 1790937491609,
+      "cpu_pct": 18.586072062248352,
+      "rss_mb": 1068.390625,
+      "footprint_mb": 2458.0497131347656,
+      "host_other_cpu_pct": 689.4503444944737,
+      "host_available_mb": 15296.3125
+    },
+    {
+      "at_ms": 1790937492610,
+      "cpu_pct": 21.29024727836574,
+      "rss_mb": 1064.75,
+      "footprint_mb": 2458.1278381347656,
+      "host_other_cpu_pct": 655.7373491473453,
+      "host_available_mb": 14831.859375
+    },
+    {
+      "at_ms": 1790937493613,
+      "cpu_pct": 25.522364158525285,
+      "rss_mb": 1114.671875,
+      "footprint_mb": 2458.1434631347656,
+      "host_other_cpu_pct": 607.9389210898353,
+      "host_available_mb": 15315.53125
+    },
+    {
+      "at_ms": 1790937494613,
+      "cpu_pct": 24.6985767445151,
+      "rss_mb": 1126.546875,
+      "footprint_mb": 2458.1434631347656,
+      "host_other_cpu_pct": 707.3231790577458,
+      "host_available_mb": 15303.109375
+    },
+    {
+      "at_ms": 1790937495609,
+      "cpu_pct": 24.99087516906703,
+      "rss_mb": 1138.6875,
+      "footprint_mb": 2458.2528381347656,
+      "host_other_cpu_pct": 832.3402786382998,
+      "host_available_mb": 15235.390625
+    },
+    {
+      "at_ms": 1790937496610,
+      "cpu_pct": 16.49250964637144,
+      "rss_mb": 1065.140625,
+      "footprint_mb": 2458.2528381347656,
+      "host_other_cpu_pct": 854.0198145853903,
+      "host_available_mb": 15190.171875
+    },
+    {
+      "at_ms": 1790937497610,
+      "cpu_pct": 17.590573651344588,
+      "rss_mb": 1044.375,
+      "footprint_mb": 2458.2528381347656,
+      "host_other_cpu_pct": 869.2195332054528,
+      "host_available_mb": 14989.59375
+    },
+    {
+      "at_ms": 1790937498610,
+      "cpu_pct": 18.99792130444463,
+      "rss_mb": 1046.78125,
+      "footprint_mb": 2458.2528381347656,
+      "host_other_cpu_pct": 848.3161708150458,
+      "host_available_mb": 14680.5
+    },
+    {
+      "at_ms": 1790937499610,
+      "cpu_pct": 22.618827346412466,
+      "rss_mb": 1026.796875,
+      "footprint_mb": 2458.2684631347656,
+      "host_other_cpu_pct": 916.5612759410983,
+      "host_available_mb": 14822.28125
+    },
+    {
+      "at_ms": 1790937500611,
+      "cpu_pct": 18.981747474318404,
+      "rss_mb": 1017.328125,
+      "footprint_mb": 2458.2684631347656,
+      "host_other_cpu_pct": 884.4356002615086,
+      "host_available_mb": 14817.65625
+    },
+    {
+      "at_ms": 1790937501610,
+      "cpu_pct": 18.71809259009001,
+      "rss_mb": 1038.75,
+      "footprint_mb": 2458.2684631347656,
+      "host_other_cpu_pct": 660.7100545602843,
+      "host_available_mb": 14830.78125
+    },
+    {
+      "at_ms": 1790937502611,
+      "cpu_pct": 23.479468191204454,
+      "rss_mb": 1073.5625,
+      "footprint_mb": 2458.2684631347656,
+      "host_other_cpu_pct": 605.9673194127764,
+      "host_available_mb": 15025.125
+    },
+    {
+      "at_ms": 1790937503615,
+      "cpu_pct": 25.22352514953064,
+      "rss_mb": 1108.265625,
+      "footprint_mb": 2458.2840881347656,
+      "host_other_cpu_pct": 605.8020199738262,
+      "host_available_mb": 15146.515625
+    },
+    {
+      "at_ms": 1790937504610,
+      "cpu_pct": 27.781480170781155,
+      "rss_mb": 1152.953125,
+      "footprint_mb": 2458.3465881347656,
+      "host_other_cpu_pct": 605.5443496057073,
+      "host_available_mb": 14970.75
+    },
+    {
+      "at_ms": 1790937505614,
+      "cpu_pct": 26.51405907882978,
+      "rss_mb": 1197.28125,
+      "footprint_mb": 2458.3934631347656,
+      "host_other_cpu_pct": 638.4887859282696,
+      "host_available_mb": 15089.921875
+    },
+    {
+      "at_ms": 1790937506610,
+      "cpu_pct": 30.419486495756388,
+      "rss_mb": 1284.765625,
+      "footprint_mb": 2458.4403381347656,
+      "host_other_cpu_pct": 634.5032364120129,
+      "host_available_mb": 15193.421875
+    },
+    {
+      "at_ms": 1790937507609,
+      "cpu_pct": 19.119328838443856,
+      "rss_mb": 1293.171875,
+      "footprint_mb": 2458.4403381347656,
+      "host_other_cpu_pct": 640.3288026281223,
+      "host_available_mb": 15383.65625
+    },
+    {
+      "at_ms": 1790937508610,
+      "cpu_pct": 20.065907180931493,
+      "rss_mb": 1313.78125,
+      "footprint_mb": 2458.4559631347656,
+      "host_other_cpu_pct": 631.0088417352714,
+      "host_available_mb": 15302.765625
+    },
+    {
+      "at_ms": 1790937509610,
+      "cpu_pct": 25.30513906886266,
+      "rss_mb": 1347.21875,
+      "footprint_mb": 2458.4715881347656,
+      "host_other_cpu_pct": 648.7714557257266,
+      "host_available_mb": 15171.921875
+    },
+    {
+      "at_ms": 1790937510611,
+      "cpu_pct": 22.88525711140152,
+      "rss_mb": 1358.5,
+      "footprint_mb": 2458.4715881347656,
+      "host_other_cpu_pct": 603.3570014833547,
+      "host_available_mb": 15665.96875
+    },
+    {
+      "at_ms": 1790937511610,
+      "cpu_pct": 23.228438391294954,
+      "rss_mb": 1361.828125,
+      "footprint_mb": 2458.4715881347656,
+      "host_other_cpu_pct": 596.8495785454184,
+      "host_available_mb": 15650.140625
+    }
+  ]
+}

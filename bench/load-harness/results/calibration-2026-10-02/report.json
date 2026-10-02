@@ -1,0 +1,89 @@
+{
+  "thresholds": {
+    "max_cv_pct": 10.0,
+    "min_runs": 5,
+    "gate": {
+      "max_host_other_cpu_pct": 200.0,
+      "max_over_fraction": 0.1
+    },
+    "allow_contended": false
+  },
+  "host": {
+    "os": "macOS 27.0",
+    "cpu": "Apple M4 Max",
+    "logical_cpus": 14,
+    "total_mem_mb": 36864
+  },
+  "groups": [
+    {
+      "target": "neoforge",
+      "label": "neoforge 26.3.0.40-beta",
+      "bots": 10,
+      "runs": 0,
+      "contended_runs": [
+        "neoforge-10bots-1790937654445.json: other processes used 915% of a core on average (limit 200%); other load above 200% in 100% of seconds (limit 10%)",
+        "neoforge-10bots-1790938648718.json: other processes used 951% of a core on average (limit 200%); other load above 200% in 100% of seconds (limit 10%)",
+        "neoforge-10bots-1790939640746.json: other processes used 639% of a core on average (limit 200%); other load above 200% in 100% of seconds (limit 10%)",
+        "neoforge-10bots-1790941474870.json: other processes used 681% of a core on average (limit 200%); other load above 200% in 100% of seconds (limit 10%)",
+        "neoforge-10bots-1790943515691.json: other processes used 652% of a core on average (limit 200%); other load above 200% in 100% of seconds (limit 10%)"
+      ],
+      "invalid_runs": [],
+      "metrics": {},
+      "place_confirm_ratio": 0.0,
+      "break_confirm_ratio": 0.0,
+      "noisy_headline_metrics": [
+        "cpu_pct_mean",
+        "mspt_mean",
+        "footprint_mb_mean"
+      ],
+      "params": ""
+    },
+    {
+      "target": "pumpkin",
+      "label": "pumpkin 742beaf6f release",
+      "bots": 10,
+      "runs": 0,
+      "contended_runs": [
+        "pumpkin-10bots-1790937990158.json: other processes used 769% of a core on average (limit 200%); other load above 200% in 100% of seconds (limit 10%)",
+        "pumpkin-10bots-1790938982246.json: other processes used 661% of a core on average (limit 200%); other load above 200% in 100% of seconds (limit 10%)",
+        "pumpkin-10bots-1790939973315.json: other processes used 761% of a core on average (limit 200%); other load above 200% in 100% of seconds (limit 10%)",
+        "pumpkin-10bots-1790940817441.json: other processes used 835% of a core on average (limit 200%); other load above 200% in 100% of seconds (limit 10%)",
+        "pumpkin-10bots-1790941807234.json: other processes used 790% of a core on average (limit 200%); other load above 200% in 100% of seconds (limit 10%)"
+      ],
+      "invalid_runs": [],
+      "metrics": {},
+      "place_confirm_ratio": 0.0,
+      "break_confirm_ratio": 0.0,
+      "noisy_headline_metrics": [
+        "cpu_pct_mean",
+        "mspt_mean",
+        "footprint_mb_mean"
+      ],
+      "params": ""
+    },
+    {
+      "target": "vanilla",
+      "label": "vanilla 26.3",
+      "bots": 10,
+      "runs": 0,
+      "contended_runs": [
+        "vanilla-10bots-1790937322630.json: other processes used 792% of a core on average (limit 200%); other load above 200% in 100% of seconds (limit 10%)",
+        "vanilla-10bots-1790938316748.json: other processes used 735% of a core on average (limit 200%); other load above 200% in 100% of seconds (limit 10%)",
+        "vanilla-10bots-1790939307609.json: other processes used 636% of a core on average (limit 200%); other load above 200% in 100% of seconds (limit 10%)",
+        "vanilla-10bots-1790940298575.json: other processes used 892% of a core on average (limit 200%); other load above 200% in 100% of seconds (limit 10%)",
+        "vanilla-10bots-1790941142635.json: other processes used 718% of a core on average (limit 200%); other load above 200% in 100% of seconds (limit 10%)"
+      ],
+      "invalid_runs": [],
+      "metrics": {},
+      "place_confirm_ratio": 0.0,
+      "break_confirm_ratio": 0.0,
+      "noisy_headline_metrics": [
+        "cpu_pct_mean",
+        "mspt_mean",
+        "footprint_mb_mean"
+      ],
+      "params": ""
+    }
+  ],
+  "comparable": false
+}

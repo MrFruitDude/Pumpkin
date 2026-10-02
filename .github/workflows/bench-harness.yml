@@ -1,0 +1,102 @@
+name: Load harness
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - "bench/load-harness/**"
+      - ".github/workflows/bench-harness.yml"
+  pull_request:
+    paths:
+      - "bench/load-harness/**"
+      - ".github/workflows/bench-harness.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Same as rust.yml: rustc needs a bigger stack for the generated pumpkin-data crate.
+  RUST_MIN_STACK: "268435456"
+
+jobs:
+  build:
+    name: Build and lint the harness
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bench/load-harness
+    steps:
+      - uses: actions/checkout@v7
+      # rustup reads bench/load-harness/rust-toolchain.toml and installs the pinned nightly.
+      - run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: bench/load-harness
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+      - run: cargo build --locked --release
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mc-load-harness-linux-x64
+          path: bench/load-harness/target/release/mc-load-harness
+
+  smoke:
+    name: Smoke run against Pumpkin
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - run: rustup update stable && rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: debug-${{ runner.os }}-${{ runner.arch }}
+      # A debug build keeps CI time sane (release uses fat LTO); this checks the harness works
+      # end to end, it is not a measurement.
+      - run: cargo build --locked -p pumpkin
+      - uses: actions/download-artifact@v8
+        with:
+          name: mc-load-harness-linux-x64
+          path: harness-bin
+      - name: Two bots for 20 seconds
+        run: |
+          chmod +x harness-bin/mc-load-harness
+          harness-bin/mc-load-harness run --target pumpkin --server target/debug/pumpkin \
+            --label "ci smoke (debug build)" --bots 2 --warmup-secs 5 --measure-secs 20 \
+            --work-root smoke/runs --out-dir smoke/raw --keep-run-dir
+          harness-bin/mc-load-harness report smoke/raw --out smoke/report
+          cat smoke/report.md
+          python3 - <<'EOF'
+          import json, glob, sys
+          run = json.load(open(glob.glob("smoke/raw/*.json")[0]))
+          print(json.dumps(run["work"], indent=1))
+          # The smoke run checks that the harness works end to end on a debug build. Server-side
+          # problems it surfaces (such as a bot getting kicked) are reported, not gated on.
+          for reason in run["invalid_reasons"]:
+              print(f"::warning::smoke run would not count as a measurement: {reason}")
+          problems = []
+          if run["work"]["bots_online_start"] < run["params"]["bots"]:
+              problems.append("not every bot was online when measuring started")
+          if run["summary"]["tick_queries"] == 0:
+              problems.append("no tick query answers parsed")
+          if run["work"]["chats_echoed"] == 0:
+              problems.append("no chat round trips")
+          if not run["samples"]:
+              problems.append("no process samples")
+          # Checks the Linux footprint path (/proc/<pid>/smaps_rollup) end to end.
+          if not run["summary"].get("footprint_mb_mean"):
+              problems.append("no process footprint measured")
+          if problems:
+              sys.exit("smoke run failed: " + "; ".join(problems))
+          EOF
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-run
+          path: smoke/
