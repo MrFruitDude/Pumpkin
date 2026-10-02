@@ -96,8 +96,8 @@ check "missing telemetry table added as off" "$cfg" telemetry.enabled false
 check "missing bedrock table added as off" "$cfg" networking.bedrock.enabled false
 
 # Explicit opt-in works.
-run_entrypoint optin PUMPKIN_TELEMETRY=true PUMPKIN_BEDROCK=yes
-cfg="$WORK/optin/data/pumpkin.toml"
+run_entrypoint opt-in PUMPKIN_TELEMETRY=true PUMPKIN_BEDROCK=yes
+cfg="$WORK/opt-in/data/pumpkin.toml"
 check "PUMPKIN_TELEMETRY=true opts in" "$cfg" telemetry.enabled true
 check "PUMPKIN_BEDROCK=yes opts in" "$cfg" networking.bedrock.enabled true
 
@@ -201,14 +201,21 @@ backup restore latest > /dev/null
 cmp -s "$B/data/pumpkin.toml" "$DEFAULTS" && pass "plain restore leaves config alone" || fail "plain restore leaves config alone"
 
 # Archives that escape the data directory are refused.
-mkdir -p "$B/evil/sub"
-printf 'x' > "$B/evil/sub/level.dat"
-(cd "$B/evil/sub" && tar -czf "$B/backups/evil.tar.gz" ../sub/level.dat)
+# Built with Python: GNU tar strips leading ../ when creating an archive.
+python3 - "$B/backups/evil.tar.gz" <<'PY'
+import io, sys, tarfile
+with tarfile.open(sys.argv[1], "w:gz") as tar:
+    for name in ("world/level.dat", "world/../../escaped/level.dat"):
+        info = tarfile.TarInfo(name)
+        info.size = 1
+        tar.addfile(info, io.BytesIO(b"x"))
+PY
 if backup restore "$B/backups/evil.tar.gz" > /dev/null 2>&1; then
     fail "restore refuses '..' paths"
 else
     pass "restore refuses '..' paths"
 fi
+[ ! -e "$B/escaped" ] && pass "nothing was written outside the data dir" || fail "nothing was written outside the data dir"
 
 if env PUMPKIN_DATA_DIR="$B/data" BACKUP_DIR="$B/backups" BACKUP_KEEP=0 sh "$BACKUP" now > /dev/null 2>&1; then
     fail "BACKUP_KEEP=0 rejected"
