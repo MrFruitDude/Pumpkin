@@ -19,6 +19,8 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # Same as rust.yml: rustc needs a bigger stack for the generated pumpkin-data crate.
+  RUST_MIN_STACK: "268435456"
 
 jobs:
   build:
