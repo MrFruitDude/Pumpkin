@@ -78,8 +78,7 @@ where
 /// namespace, so players from a vanilla offline-mode world keep their data.
 #[must_use]
 pub fn offline_uuid(username: &str) -> Uuid {
-    let digest = md5::compute(format!("OfflinePlayer:{username}").as_bytes());
-    uuid::Builder::from_md5_bytes(digest.0).into_uuid()
+    pumpkin_auth::offline::offline_player_uuid(username)
 }
 
 /// The offline-mode UUID older Pumpkin versions gave a player: the first 16
