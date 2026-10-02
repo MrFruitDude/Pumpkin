@@ -18,6 +18,11 @@ use tempfile::TempDir;
 use uuid::Uuid;
 
 use crate::data::VanillaData;
+use crate::data::banned_ip::BannedIpList;
+use crate::data::banned_player::BannedPlayerList;
+use crate::data::op::OperatorConfig;
+use crate::data::usercache::UserCache;
+use crate::data::whitelist::WhitelistConfig;
 use crate::entity::player::Player;
 use crate::entity::projectile::arrow::ArrowEntity;
 use crate::entity::{Entity, EntityBase};
@@ -53,11 +58,11 @@ async fn fixture(pvp: bool) -> Fixture {
     advanced.networking.bedrock.online_mode = false;
     advanced.pvp.enabled = pvp;
     let data = VanillaData {
-        banned_ip_list: RwLock::new(Default::default()),
-        banned_player_list: RwLock::new(Default::default()),
-        operator_config: RwLock::new(Default::default()),
-        user_cache: RwLock::new(Default::default()),
-        whitelist_config: RwLock::new(Default::default()),
+        banned_ip_list: RwLock::new(BannedIpList::default()),
+        banned_player_list: RwLock::new(BannedPlayerList::default()),
+        operator_config: RwLock::new(OperatorConfig::default()),
+        user_cache: RwLock::new(UserCache::default()),
+        whitelist_config: RwLock::new(WhitelistConfig::default()),
     };
     let server = Server::new(basic, advanced, TelemetryConfig::default(), data)
         .await
@@ -97,7 +102,7 @@ impl Fixture {
         let profile = GameProfile {
             id: Uuid::new_v4(),
             name: name.to_string(),
-            properties: Default::default(),
+            properties: arc_swap::ArcSwap::from_pointee(Vec::new()),
             profile_actions: None,
         };
         let client = JavaClient::from_pending(pending, profile.clone(), PlayerConfig::default());
@@ -128,10 +133,11 @@ impl Fixture {
 }
 
 fn java(player: &Player) -> &JavaClient {
-    match player.client.as_ref() {
-        ClientPlatform::Java(client) => client,
-        ClientPlatform::Bedrock(_) => unreachable!(),
-    }
+    let client = match player.client.as_ref() {
+        ClientPlatform::Java(client) => Some(client),
+        ClientPlatform::Bedrock(_) => None,
+    };
+    client.unwrap()
 }
 
 fn health(entity: &dyn EntityBase) -> f32 {
@@ -164,7 +170,7 @@ fn raise_shield(player: &Player) {
 
 // ── Melee: Pumpkin-MC/Pumpkin#3383, #3513, #3332 ─────────────────────────────
 
-/// Vanilla `Player.attack`: a full-strength fist hit deals ATTACK_DAMAGE (1.0) and a
+/// Vanilla `Player.attack`: a full-strength fist hit deals `ATTACK_DAMAGE` (1.0) and a
 /// zombie's natural armor (2) cuts it via `CombatRules.getDamageAfterAbsorb` to
 /// 1 * (1 - max(2 - 1/2, 2*0.2)/25) = 0.94.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -183,7 +189,7 @@ async fn melee_hit_damages_a_mob_through_its_natural_armor() {
 }
 
 /// Vanilla `ServerProperties.pvp` only stops player-versus-player damage
-/// (`ServerPlayer.isPvpAllowed`); with PvP off players still kill mobs.
+/// (`ServerPlayer.isPvpAllowed`); with pvp off players still kill mobs.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pvp_off_still_lets_players_hit_mobs() {
     let f = fixture(false).await;
@@ -195,7 +201,7 @@ async fn pvp_off_still_lets_players_hit_mobs() {
     assert!(health(zombie.as_ref()) < 20.0, "the zombie took no damage");
 }
 
-/// Regression guard: PvP off still blocks player-versus-player hits.
+/// Regression guard: pvp off still blocks player-versus-player hits.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pvp_off_still_blocks_player_hits() {
     let f = fixture(false).await;
