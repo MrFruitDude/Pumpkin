@@ -1,0 +1,7 @@
+[toolchain]
+# azalea (and its simdnbt dependency) need nightly features. The azalea 26.3 branch still uses
+# `generic_const_exprs`, which newer nightlies (1.100, August 2026 on) reject, so this is pinned
+# to a July nightly. Bump together with the azalea rev in Cargo.toml.
+channel = "nightly-2026-07-20"
+profile = "minimal"
+components = ["rustfmt", "clippy"]
