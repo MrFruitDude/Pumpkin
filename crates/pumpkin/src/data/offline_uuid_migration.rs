@@ -324,7 +324,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let players = dir.path();
         // A forgotten name whose hash does not look like a v3/v4 UUID.
-        let unknown = (0..)
+        let unknown = (0..1000)
             .map(|i| legacy_pumpkin_offline_uuid(&format!("Forgotten{i}")))
             .find(|u| !matches!(u.get_version_num(), 3 | 4))
             .unwrap();
@@ -369,7 +369,7 @@ mod tests {
 
     #[test]
     fn remaps_only_entries_with_their_own_legacy_uuid() {
-        let mut ops = vec![
+        let mut ops = [
             ("Steve".to_string(), legacy_pumpkin_offline_uuid("Steve")),
             ("Alex".to_string(), offline_uuid("Alex")),
             ("Online".to_string(), Uuid::new_v4()),
