@@ -150,10 +150,7 @@ impl PluginRuntime {
         legacy_sync_reentry: concurrent_store::LegacySyncReentry,
         store_spawner: Arc<dyn RuntimeSpawner>,
     ) -> Result<Self, PluginInitError> {
-        let mut config = wasmtime::Config::new();
-        config.wasm_component_model(true);
-        config.wasm_component_model_async(true);
-        config.concurrency_support(true);
+        let mut config = pumpkin_plugin_runtime::engine_config();
         let mut path =
             std::path::absolute(path.as_ref()).map_err(PluginInitError::PathResolutionFailed)?;
         path.pop();
@@ -162,11 +159,6 @@ impl PluginRuntime {
         cache_config.with_directory(&path);
         let cache = Cache::new(cache_config).map_err(PluginInitError::CacheCreationFailed)?;
         config.cache(Some(cache));
-
-        config.gc_support(true);
-        config.wasm_gc(true);
-        config.wasm_exceptions(true);
-        config.wasm_function_references(true);
 
         let engine = Engine::new(&config).map_err(PluginInitError::EngineCreationFailed)?;
 

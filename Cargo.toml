@@ -20,6 +20,7 @@ members = [
     "crates/pumpkin-util",
     "crates/pumpkin-host-bindings",
     "crates/pumpkin-world",
+    "crates/pml-bench",
     "tools/pumpkin-codegen",
     "tools/pumpkin-fuzzer",
 ]
@@ -245,6 +246,7 @@ postcard = { version = "1.1", default-features = false, features = ["alloc"] }
 tracing-serde-structured = { version = "0.4", default-features = false }
 wasmparser = { version = "0.259", default-features = false }
 wasm-encoder = { version = "0.259", default-features = false, features = ["component-model", "std"] }
+wat = "=1.259.0"
 webpki-root-certs = { version = "1.0.9", default-features = false }
 # ring-only: must match the provider the rest of the tree (wasmtime-wasi-http, rtc) uses
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }

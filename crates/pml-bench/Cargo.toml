@@ -1,0 +1,28 @@
+[package]
+name = "pml-bench"
+description = "P0 benchmarks for the Pumpkin Mod Loader: host<->WASM hook latency on Pumpkin's plugin runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+pumpkin-plugin-runtime.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
+wasmtime.workspace = true
+wat.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "p0"
+harness = false
+
+[[bench]]
+name = "hooks"
+harness = false
+
+[lints]
+workspace = true
