@@ -1,6 +1,6 @@
 # Rust Mod Loader for Pumpkin — Draft Spec (v0.1)
 
-Status: v0.2 — open questions Q1–Q9 decided by the user (§13, 2026-10-02); P0 benchmark done, verdict **NO-GO for per-call sync hooks**, batched path passes ([bench-p0.md](bench-p0.md)) · Target: Pumpkin `0.2.0+26.3` (upstream `742beaf`, 2026-09-30), Minecraft Java 26.3 · Author: kirocrew-worker · Date: 2026-10-01, decisions 2026-10-02
+Status: v0.3 — open questions Q1–Q9 decided by the user (§13, 2026-10-02); P0 benchmark done, verdict **NO-GO for per-call sync hooks**, batched path passes ([bench-p0.md](bench-p0.md)); the API is now **batch-first on hot paths** (D9, §4.13); P1 runtime registry layer implemented (§10) · Target: Pumpkin `0.2.0+26.3` (upstream `742beaf`, 2026-09-30), Minecraft Java 26.3 · Author: kirocrew-worker · Date: 2026-10-01, decisions 2026-10-02
 
 Working name: **PML** (Pumpkin Mod Loader). Guest crate `pml`, WIT package `pumpkin:mod`, CLI `cargo mod`.
 
@@ -22,6 +22,7 @@ Open questions were marked **[Q#]** and collected in §12. All of them are resol
 | D6 | Vanilla client sees mod content through a **server-side remapping layer** (Polymer model): real server-side IDs, remapped to vanilla "carrier" block states / base items on the wire, plus an auto-built **server resource pack** | Only approach that works without a client mod |
 | D7 | Registries **freeze at startup**; IDs are persisted **by name**; hot reload is allowed for logic only when the content manifest hash is unchanged | Saved chunks and live clients depend on stable IDs |
 | D8 | Mixins/ATs are replaced by **explicit, versioned hook points** in the host, added on demand through a hook-request process | Rust can't patch the host; explicit hooks are also what make hot reload and sandboxing possible |
+| D9 | **Batch-first guest calls on hot paths**: anything fired per tick, per block entity, per entity or per packet reaches a mod as one call per mod per tick phase carrying a `list<…>`; one call per occurrence only for rare events (§4.13) | P0 measured 0.58 µs per direct call and 8.3 µs p50 per call through the tick-thread executor (NO-GO), but 15 µs for a whole batched 10k-entry tick (GO) |
 
 ---
 
@@ -83,7 +84,7 @@ Valence (Bevy ECS-based Rust server framework) models clients, chunk layers and 
 
 | Criterion | WASM component (wasmtime) | Native dylib (`abi_stable` / C ABI) | Compile-time crates (static) |
 |---|---|---|---|
-| Call overhead host↔mod | ~10–50 ns per trivial call; extra for canonical-ABI copies of strings/lists; resources avoid copies | ~1–5 ns (indirect call) | 0 (inlined) |
+| Call overhead host↔mod | measured in P0: ~0.2 µs sync / ~0.58 µs async direct call, ~8 µs p50 from the tick thread via `StoreExecutor`; a batched 10k-entry call ~7–15 µs total; extra for canonical-ABI copies of strings/lists; resources avoid copies | ~1–5 ns (indirect call) | 0 (inlined) |
 | Guest compute speed | ~0.7–0.9× native (Cranelift), no SIMD autovectorization parity, no threads in guest by default | 1× | 1× |
 | Memory isolation | Full (linear memory, OOB traps) | None — a mod bug corrupts the server | None |
 | Crash isolation | Trap → unload/disable that mod, server lives | Panic across FFI = abort; segfault = server dies | Panic = server dies (can `catch_unwind` per hook, not UB-safe for all) |
@@ -95,7 +96,7 @@ Valence (Bevy ECS-based Rust server framework) models clients, chunk layers and 
 | Language | Rust (others possible but not supported) | Rust | Rust |
 | Async in guest | component-model-async (p3), already enabled | Must share runtime — hard | Native tokio |
 
-Overhead and speed figures above are typical published/experienced ranges, not measured on this codebase; P0 measures them on Pumpkin's actual host.
+The WASM call-overhead figures are P0's measurements on Pumpkin's actual host ([bench-p0.md](bench-p0.md)); the other figures are typical published/experienced ranges, not measured on this codebase.
 
 ### 2.2 Decision
 
@@ -202,15 +203,24 @@ world mod {
     import structures;    // bulk/scheduled block placement, blueprint IO
 
     export register: func(reg: registrar) -> result<_, string>;        // phase 1
-    export block-hook: func(hook: block-hook-id, ctx: block-hook-ctx) -> hook-result;
-    export item-hook:  func(hook: item-hook-id,  ctx: item-hook-ctx)  -> hook-result;
-    export entity-hook: func(hook: entity-hook-id, ctx: entity-hook-ctx) -> hook-result;
-    export block-entity-tick: func(batch: list<block-entity-ref>);    // batched
+
+    // Hot path (§4.13): one call per mod per tick phase, never one per occurrence.
+    // The host queues invocations while the phase runs, then delivers the list;
+    // results come back in the same order and are applied by the host.
+    export block-hooks: func(phase: tick-phase, batch: list<block-hook-call>) -> list<hook-result>;
+    export entity-hooks: func(phase: tick-phase, batch: list<entity-hook-call>) -> list<hook-result>;
+    export block-entity-tick: func(batch: list<block-entity-ref>);
+    export events-batched: func(phase: tick-phase, batch: list<event>);   // §4.3 batched events
+
+    // Rare, player- or operator-driven: one call each, with a result the host
+    // needs before it continues (e.g. whether vanilla `use` still runs).
+    export block-use: func(ctx: block-use-ctx) -> hook-result;
+    export item-use: func(ctx: item-use-ctx) -> hook-result;
     export handle-payload: func(channel: u32, player: player, data: list<u8>);
     export datagen: func(out: datagen-output) -> result<_, string>;   // build-time only
 }
 ```
-Rust facade hides ids: handlers are closures/traits registered by the macros; dispatch tables are generated (the existing `pumpkin-plugin-api` handler-id pattern).
+`block-hook-call` = `{ hook: block-hook-id, pos, state, extra }` for the tick-driven block hooks (`random_tick`, `scheduled_tick`, `neighbor_update`, `entity_step`, `place`/`broken` caused by world simulation); `entity-hook-call` likewise for mod entity types (`tick`, `ai-step`). Rust facade hides ids and batching: handlers are closures/traits registered by the macros and written per occurrence; the generated dispatcher loops over the batch inside the guest, so a mod author does not see the list (the existing `pumpkin-plugin-api` handler-id pattern).
 
 ### 4.1 Lifecycle (≈ mod bus)
 
@@ -262,7 +272,7 @@ Reuse every Pumpkin plugin event (player/block/entity/world/inventory/server/pac
 | World/Chunk | `chunk-load/unload` (exist), `chunk-data-load/save { nbt }` (≈ ChunkDataEvent), `level-load/unload/save`, `explosion-detonate { mut affected }`, `sapling-grow`, `crop-grow` |
 | Network | `payload-registered`, `player-channel-register`, packet in/out (exist) |
 
-Semantics: priorities `lowest..highest` + `monitor` (read-only); `cancelable` per event; **mutable events** use the existing `handle-event(...) -> event` return. New: `#[pml::event(batched)]` delivers `list<event>` once per tick for high-frequency events (e.g. `entity-damage`, `player-move`) — Valence-style; non-cancellable by design.
+Semantics: priorities `lowest..highest` + `monitor` (read-only); `cancelable` per event; **mutable events** use the existing `handle-event(...) -> event` return. **Batch-first (D9, §4.13):** events that can fire per tick, per entity, per block entity or per packet (`player-tick`, `player-move`, `entity-damage`/`living-damage`, `block-break-progress`, `neighbor-notify`, `chunk-load/unload`, packet in/out, `item-pickup`, …) are delivered **only** in batched form — `list<event>` once per mod per tick phase via `events-batched`, Valence-style. `#[pml::event]` on such an event is batched automatically; there is no per-occurrence opt-in. A batched event that needs a decision (cancel, mutate amount) returns a `list<event-result>` aligned with the batch, applied by the host at the end of the phase, so its effect lands in the same tick but after the queued occurrence (documented per event). Per-occurrence delivery stays for rare events: lifecycle phases, `config-reloaded`, `player-logged-in/out`, commands, `advancement-earn`, `player-clone`, `level-load/unload/save`, `right-click-*` (the use decision of §4.0).
 
 ### 4.4 Capabilities & attachments
 
@@ -299,7 +309,7 @@ Guest declares `#[derive(Config)] struct RubyConfig { #[range(1..=64)] drop_coun
 ### 4.11 Scheduling & threading
 
 - Guest code is **single-threaded per mod** (one Store). Host serializes calls into a mod (existing `LegacySyncReentry` admission) and bounds re-entry depth.
-- Two call classes: **sync hooks** (block/item/entity hooks, cancellable events with `blocking=true`) run on the tick thread and must return within budget; **async handlers** (non-blocking events, payloads, scheduled tasks with I/O) run on tokio via component-model-async and may await host I/O (HTTP, fs) but may not touch the world except through `server.run-on-tick(fn)` (queued to next tick).
+- Three call classes: **batched tick-phase calls** (block/entity hooks, block-entity ticks, high-frequency events; §4.13) run on the tick thread once per mod per phase and share the mod's tick budget; **rare sync decisions** (`block-use`, `item-use`, cancellable rare events with `blocking=true`) run on the tick thread one call each, individually budgeted — at P0's 8.3 µs p50 a mod affords ~240 of them per tick inside its 2 ms; **async handlers** (non-blocking events, payloads, scheduled tasks with I/O) run on tokio via component-model-async and may await host I/O (HTTP, fs) but may not touch the world except through `server.run-on-tick(fn)` (queued to next tick).
 - Scheduler: reuse `pumpkin-scheduler` (`delay(ticks)`, `repeat(period)`, `async`), plus `world.schedule-block-tick(pos, delay, priority)` (vanilla scheduled ticks; dispatches `on_scheduled_tick`).
 - World mutation from guests goes through host calls; bulk ops (`structures.place(blueprint, pos, rotation, mode: instant|per-tick(n))`) avoid per-block calls.
 
@@ -327,6 +337,20 @@ Top hooks a MineColonies-scale mod needs (all must exist by P9):
 | H14 | Recipe lookup API (`recipes.matching(type, inputs)`) for crafting workers | Citizen crafters |
 | H15 | Inventory helpers on players/entities (exists) + `item-handler` | Couriers moving items |
 | H16 | Display entities + text displays (exist) for in-world UI | Building outlines, name tags |
+
+### 4.13 Hot-path rule (batch-first, D9)
+
+P0 ([bench-p0.md](bench-p0.md)) measured a direct host→guest component call at 0.58 µs p50 and a call from the synchronous tick through Pumpkin's `StoreExecutor` at 8.3 µs p50: 1,000 per-occurrence hooks per tick would cost 8 ms, four times a mod's 2 ms budget. The same 10k-entry block-entity tick as one batched call costs ~15 µs. So:
+
+| Fires… | Examples | Guest call shape |
+|---|---|---|
+| per tick, per block / block entity / entity / player | `random_tick`, `scheduled_tick`, `neighbor_update`, `entity_step`, block-entity tick, mod entity `tick`/AI, `player-tick` | **batched**: one call per mod per tick phase, `list<…>` in, results list out |
+| per packet or per movement | packet in/out, `player-move`, `block-break-progress` | **batched** per tick phase |
+| per world-simulation event | `living-damage`, `living-drops`, `item-pickup`, `explosion-detonate`, `chunk-load/unload`, `crop-grow` | **batched** per tick phase; decisions returned as an aligned results list |
+| per player action that needs an answer before vanilla continues | `block-use`, `item-use`, command execution, menu clicks | **per call**, rare, individually budgeted |
+| per lifecycle / admin action | `register`, `server-started`, `config-reloaded`, `player-logged-in`, `datagen` | **per call** |
+
+Rules: (1) a new hook proposed through the hook-request process (§4.12) must state its class, and anything that can fire more than a few times per tick per player is batched; (2) a mod that subscribes to no hook in a phase costs zero calls in that phase (subscriber list checked by one branch); (3) declarative data (§4.2) never calls the guest; (4) the host side owns the queueing, so batching is invisible to mod authors writing `#[pml::block_hook]` / `#[pml::event]` handlers. P5/P7/P8/P12 implement this; P9 re-measures with the P0 harness.
 
 ---
 
@@ -386,7 +410,7 @@ Reuse Pumpkin permissions verbatim; mods request in `pml.toml`, operator grants 
 - Enforcement: wasmtime epoch interruption (1 ms epochs). Sync hook deadline = min(remaining mod budget, 5 ms hard cap) → trap → strike. Async handlers have a wall-clock timeout instead.
 - Measurement: per-mod, per-hook histograms exported via `/pml profile` and tracing spans; `cargo mod run --profile` uses fuel for deterministic cost.
 - Design rules that keep it cheap: declarative block properties never call the guest; hooks are subscribed per block type via bitmask; high-frequency events are batched; bulk world APIs; resources (handles) instead of copying large records; `block-entity-tick` batched per mod per tick.
-- Targets to validate in P0 (go/no-go for D2): trivial hook round-trip ≤ 100 ns; 10k ticking mod block entities ≤ 2 ms/tick; 200 citizens pathing via H2 ≤ 3 ms/tick. **[Q6, resolved §13]** P0 result ([bench-p0.md](bench-p0.md)): the 10k batched tick passes with ≥ 50× headroom; the 100 ns per-call target fails (~0.58 µs direct, ~8 µs p50 through Pumpkin's tick-thread dispatch); the pathing target is deferred to P13. The report proposes batching tick-fired hooks per mod; that change is pending the spec owner's approval.
+- Targets to validate in P0 (go/no-go for D2): trivial hook round-trip ≤ 100 ns; 10k ticking mod block entities ≤ 2 ms/tick; 200 citizens pathing via H2 ≤ 3 ms/tick. **[Q6, resolved §13]** P0 result ([bench-p0.md](bench-p0.md)): the 10k batched tick passes with ≥ 50× headroom; the 100 ns per-call target fails (~0.58 µs direct, ~8 µs p50 through Pumpkin's tick-thread dispatch); the pathing target is deferred to P13. The report's proposal to batch tick-fired hooks per mod is **adopted** (D9, §4.13). Revised per-call target: rare sync decisions ≤ 10 µs p50 from the tick thread; batched tick-phase calls ≤ 50 µs p99 per mod per phase for ≤ 10k entries.
 
 ### 6.4 Versioning
 - WIT package `pumpkin:mod@MAJOR.MINOR.0`; `pml` crate version == WIT version. Minor = additive only (new functions/interfaces/variant cases behind feature negotiation), major = breaking.
@@ -403,7 +427,7 @@ Reuse Pumpkin permissions verbatim; mods request in `pml.toml`, operator grants 
 ---
 
 ## 8. Integration points in Pumpkin (for the Pumpkin-fork worker)
-1. Runtime registry layer over `pumpkin-data` statics (`BlockId`/`BlockStateId`/item ids beyond `COUNT`; `BlockRegistry.block_indices` becomes a `Vec`). Biggest change; touches anything that assumes `&'static Block`.
+1. Runtime registry layer over `pumpkin-data` statics (`BlockId`/`BlockStateId`/item ids beyond `COUNT`). **Done in P1** as `pumpkin_data::runtime_registry`, see the P1 notes under §10. It kept `&'static Block`/`&'static BlockState` working by leaking the frozen tables; `BlockRegistry::get_pumpkin_block` returns no behaviour for runtime ids instead of indexing past its table.
 2. Wire remap in `NetworkPalette` encoding, block update packets, `item_stack_seralizer.rs` (both directions), entity spawn metadata.
 3. Generated resource pack + built-in pack HTTP host, replacing static `ResourcePackConfig` when mods exist.
 4. `epoch_interruption` + deadlines in the wasm host; quarantine logic in `PluginManager`.
@@ -533,13 +557,13 @@ Each phase = one PR-sized item with its own acceptance test. Phases P1–P3 touc
 | Phase | Scope | Acceptance test |
 |---|---|---|
 | **P0** Bench harness | Criterion + in-server bench: host↔guest call round-trip, record copy cost, 10k batched BE ticks, epoch overhead, on the current Pumpkin wasm host | `cargo bench -p pml-bench` prints numbers; report committed in `docs/pml/bench-p0.md` (mirrored in `planning/bench-p0.md`); go/no-go on §6.3 targets recorded — **done, NO-GO**, see [bench-p0.md](bench-p0.md) |
-| **P1** Runtime registry layer | Block/state/item ids extendable past vanilla `COUNT`, name-based persistence, missing-mapping placeholders; internal Rust API only (no WASM) | Unit tests + GameTest: register a test block from Rust in a test build, place it, save + reload world, block survives; remove registration → `pml:missing` preserves name/NBT and restores when re-added |
+| **P1** Runtime registry layer | Block/state/item ids extendable past vanilla `COUNT`, name-based persistence, missing-mapping placeholders; internal Rust API only (no WASM) | Unit tests + GameTest: register a test block from Rust in a test build, place it, save + reload world, block survives; remove registration → `pml:missing` preserves name/NBT and restores when re-added — **done**, see P1 notes below |
 | **P2** Wire remap + carrier pool | Carrier allocator (note block first), palette/block-update/item remap both directions, mining-speed handling | Protocol test: encode chunk containing the test block → bytes contain carrier id; serverbound creative stack with mod item round-trips to the mod item; headless vanilla-protocol bot (e.g. azalea) connects and sees carrier state |
 | **P3** Resource pack builder + host | Merge assets, generate carrier blockstates + item model definitions, SHA-1, built-in HTTP host, config-phase push | Test: pack zip validates (pack.mcmeta format for 26.3, blockstate JSON parses), SHA-1 matches served bytes; manual: vanilla 26.3 client shows the test block textured **(needs human check, [Q7, resolved §13]: Simon)** |
 | **P4** `pumpkin:mod` WIT world + loader + manifest | `pml.toml` parsing, dep resolution/ordering, `register` phase, `pml` guest crate, `cargo mod new/build`, block + item registration from WASM | `cargo mod new demo && cargo mod build` yields `.pmod`; server loads it; GameTest places `demo:block` and asserts properties; dependency cycle and range-mismatch tests produce the documented errors |
-| **P5** Block hooks | Hook bitmask dispatch for `use`, `place`, `broken`, `neighbor_update`, `random_tick`, `scheduled_tick`, `entity_step`; behaviour overrides on vanilla blocks (H12) | GameTests per hook; bench: unsubscribed hook adds ≤ 1 branch (bench delta < 1 %) |
+| **P5** Block hooks | Hook bitmask dispatch: `use` per call; `place`, `broken`, `neighbor_update`, `random_tick`, `scheduled_tick`, `entity_step` queued per tick phase and delivered batched (§4.13); behaviour overrides on vanilla blocks (H12, needs `pml.override.vanilla`) | GameTests per hook; bench: unsubscribed hook adds ≤ 1 branch (bench delta < 1 %); 10k queued tick hooks for one mod ≤ 50 µs p99 per phase |
 | **P6** Items + data components | Item def, base item mapping, `display` hook, custom components in `custom_data`, item hooks (use, use_on, finish_using, attack) | GameTest: give mod item, use it → hook fires; creative slot round-trip keeps component values |
-| **P7** Events delta + batching | New events of §4.3, mutable/cancellable semantics, `batched` delivery | GameTests for `block-drops`, `living-damage` (mutate amount), cancellation; batched handler receives N events in one call |
+| **P7** Events delta + batching | New events of §4.3, mutable/cancellable semantics, batched delivery mandatory for high-frequency events (§4.13) | GameTests for `block-drops`, `living-damage` (mutate amount via the aligned results list), cancellation; batched handler receives N events in one call; no per-occurrence guest call for a batched event (counter assertion) |
 | **P8** Attachments + saved data + block entities | Attachment types on 5 holders, saved data, mod BE types with batched ticking, `item-handler` capability incl. vanilla containers | GameTest: attachment survives world save/reload and `copy_on_death`; hopper inserts into mod BE via capability; 10k ticking BEs within budget |
 | **P9** Budget, quarantine, hot reload | Epoch deadlines, strike counter, quarantine, logic hot reload with manifest hash check | Test mod with infinite loop in a hook → traps within 5 ms, mod quarantined after 3 strikes, server TPS stays 20; edit logic + rebuild → hot reload keeps attachments; content edit → reload refused |
 | **P10** Config + commands sugar + payloads | `#[derive(Config)]`, TOML gen/validation/reload, `#[pml::command]`, payload channels | Tests: bad config value rejected with message; `/pml config reload` fires event; payload sent only to clients that registered channel (protocol test) |
@@ -548,6 +572,14 @@ Each phase = one PR-sized item with its own acceptance test. Phases P1–P3 touc
 | **P13** MineColonies-scale APIs | H2 pathing, H4 structures, H5 tickets, H7 menus (+ dialogs), H11 trades, H13 loot modifiers, H14 recipe lookup | Port a "mini-colony" example mod (1 hut BE, 5 citizens that path to a chest and build a 5×5 schematic) — GameTest completes within N ticks; 200-citizen bench meets §6.3 |
 | **P14** Optional Rust client tier | `pml:hello` negotiation, real registry sync for PML clients, client-side mod half | Protocol test with a stub client: negotiated connection receives real ids, vanilla connection receives carriers simultaneously |
 | **P15** (conditional) Static-mod tier | `pml` `native` feature, `cargo mod build-server` | Same sample mod compiled both ways passes the same GameTests; bench shows the gain that justified it |
+
+### P1 notes (runtime registry layer)
+
+- **Where:** `crates/pumpkin-data/src/runtime_registry.rs`. `Registrar` collects `BlockDef`s (name, vanilla template state for shape/flags, hardness/blast resistance, luminance, properties) and `ItemDef`s (name, vanilla base item for components, optional block it places); `Registrar::freeze` assigns ids once per process and publishes the tables. `ensure_frozen()` freezes an empty registry; `Server::new` calls it before any world loads.
+- **Ids:** blocks from `BlockId::COUNT`, states from `BlockStateId::COUNT`, items from `Item::VANILLA_COUNT`, in registration order; the reserved `pml:missing` block is always the first runtime block. `COUNT` keeps meaning "vanilla count". `BlockId::new`/`BlockStateId::new` stay `const` and vanilla-only; `::registered(u16)` also accepts runtime ids. The generated lookups (`BlockState::from_id`, `Block::from_id`/`from_state_id`/`from_name`/`from_registry_key`/`from_item_id`/`properties`/`from_properties`, `BlockId::from_state_id`, `Item::from_id`/`from_registry_key`) branch once on the vanilla range and fall back to the registry; the codegen templates (`tools/pumpkin-codegen`) emit the same code. They lost `const`; one caller (`BlockMatchRuleTest::test`) followed.
+- **Persistence:** by name. Chunk palettes write `Name` (runtime names keep their own namespace) + `Properties`. A palette entry from a non-`minecraft` namespace that is not registered loads as an interned `pml:missing` placeholder state that remembers the entry and writes it back on save; block entity NBT is untouched; re-registering restores the block even if its ids moved. Unknown `minecraft:` names keep vanilla behaviour (air). Placeholders copy barrier physics (unbreakable) so survival play cannot destroy them by accident.
+- **Tests:** `crates/pumpkin-gametest/tests/runtime_registry.rs` — a test mod registered from Rust; `runtime_block_survives_reload_and_mod_removal` runs three world sessions in child processes (with mod → without mod → mod restored with shifted ids) through the `GameTest` helper and the real region-file chunk IO; plus id/lookup/property/item/validation/placeholder tests.
+- **Not in P1 (by the spec's split):** the Java wire remap (P2) — runtime ids must not reach a vanilla client, so content registration stays test-only until P2 lands; missing-mapping for item stacks (`pml:missing_item`, with P6's item stack/component work); mod block entity types (P8); a WASM-built sample mod (P4, with the `pumpkin:mod` world and loader).
 
 ---
 
@@ -577,7 +609,7 @@ binding for the phases in §10; a change needs a new decision, not an edit here.
 | # | Decision | Effect on the spec |
 |---|---|---|
 | Q1 | **Static (compiled-in, unsandboxed) tier only if the P0/P13 benchmarks demand it.** Every mod is sandboxed WASM until then. | D2/P15 stay deferred and conditional. P0 ([bench-p0.md](bench-p0.md)) does not trigger it: its failing case (per-call hook cost) has a WASM-side remedy, batching, which passes the budgets with ≥ 50× headroom. P13's 200-citizen pathing benchmark is the remaining trigger. |
-| Q2 | **Names: `cargo mod` (CLI), `pml` (guest crate), `pumpkin:mod` (WIT package)**, subject to a crates.io name check. | Check done 2026-10-02 against the crates.io API: **`pml` is taken** (v0.6.1, an unrelated config-format parser, last updated 2023-09-09) and **`cargo-mod` is taken** (v0.1.5, an unrelated module generator, 2017-04-28). Free: `cargo-pml`, `pumpkin-pml`, `pumpkin-mod`, `pml-api`, `pml-sdk`, `pml-mock`, `pml-codegen`, `pml-bench`. The approved names still work as the names users type: the CLI publishes as package `cargo-pml` with binary `cargo-mod` (invoked as `cargo mod`; clashes only if someone also installs the unrelated `cargo-mod`), and the guest crate publishes as package `pumpkin-pml` with `[lib] name = "pml"`, so mod code still writes `use pml::…`. `pml-mock`, `pml-codegen` and `pml-bench` keep their names. This only matters at first crates.io publish; in-workspace crates can use the short names. WIT `pumpkin:mod` has no registry conflict. |
+| Q2 | **Names: `cargo mod` (CLI), `pml` (guest crate), `pumpkin:mod` (WIT package)**, subject to a crates.io name check. | Check done 2026-10-02 against the crates.io API: **`pml` is taken** (v0.6.1, an unrelated config-format parser, last updated 2023-09-09) and **`cargo-mod` is taken** (v0.1.5, an unrelated module generator, 2017-04-28). Free: `cargo-pml`, `pumpkin-pml`, `pumpkin-mod`, `pml-api`, `pml-sdk`, `pml-mock`, `pml-codegen`, `pml-bench`. The approved names still work as the names users type: the CLI publishes as package `cargo-pml` with binary `cargo-mod` (invoked as `cargo mod`; clashes only if someone also installs the unrelated `cargo-mod`), and the guest crate publishes as package `pumpkin-pml` with `[lib] name = "pml"`, so mod code still writes `use pml::…`. `pml-mock`, `pml-codegen` and `pml-bench` keep their names. This only matters at first crates.io publish; in-workspace crates can use the short names. WIT `pumpkin:mod` has no registry conflict. Re-checked 2026-10-02 for P1: `pml` and `cargo-mod` still taken; `pumpkin-pml`, `cargo-pml`, `pml-mock`, `pml-codegen`, `pml-bench` still free. P1 adds no publishable crate (the registry layer is a module of `pumpkin-data`), so the chosen names are unchanged: guest crate package `pumpkin-pml` (lib `pml`), CLI package `cargo-pml` (binary `cargo-mod`). |
 | Q3 | **Message-passing IPC between mods in v1; typed WIT interface linking later.** | §4.4 phase 1 (postcard messages over the existing `ipc` interface) is the v1 scope; component linking (phase 2) is post-v1. |
 | Q4 | **Accept the ~1,500 distinct custom full-block cap for v1.** | §5.1 carrier pool stands as designed; lifting the cap is not a reason to pull the Rust client (§5.3) forward. |
 | Q5 | **Defer the Rust client until PommeMC's 26.3 support is verified.** | P14 stays last and is gated on someone confirming PommeMC speaks the 26.3 protocol. |
@@ -585,3 +617,4 @@ binding for the phases in §10; a change needs a new decision, not an edit here.
 | Q7 | **Simon performs the vanilla-client visual checks** (P3, P6, P12). | Those acceptance steps name Simon as the human checker; agents prepare the build and the steps to look at. |
 | Q8 | **Overriding vanilla block/item behaviour (H12) only with an operator-granted permission.** | H12 is gated by a new permission (proposed `pml.override.vanilla`, deny by default) in `config/pml-permissions.toml` (§6.1). A mod without it gets a load-time error for any `behaviour-override` registration. |
 | Q9 | **Keep the fork; upstream the registry layer once it is stable. No upstream contact for now.** | All work stays in `MrFruitDude/Pumpkin`. Nothing is proposed to Pumpkin-MC until the runtime registry layer (P1) has settled and the user decides to reach out. |
+| P1-scope | **P1 is the internal Rust registry API only; no WASM.** Approved by the conductor on 2026-10-02 for round 3. | P1's test mod is Rust code that registers through `pumpkin_data::runtime_registry` in a test build (acceptance test `runtime_block_survives_reload_and_mod_removal`), not a wasm component. The registry and its later dispatch are designed batch-first per P0 (D9, §4.13). The first sample mod built to wasm moves to P4, where the loader that can run it lands. |

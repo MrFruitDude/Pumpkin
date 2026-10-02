@@ -1731,6 +1731,10 @@ pub fn build() -> TokenStream {
     let mut all_java_items = Vec::new();
     let mut all_java_item_ids = Vec::new();
 
+    // Runtime items (PML) are numbered from the first id after vanilla's.
+    let vanilla_count = items.values().map(|item| item.id + 1).max().unwrap_or(0);
+    let vanilla_count = LitInt::new(&format!("{vanilla_count}u16"), Span::call_site());
+
     for (name, item) in &items {
         let const_ident = format_ident!("{}", name.to_shouty_snake_case());
 
@@ -1987,22 +1991,25 @@ pub fn build() -> TokenStream {
                 TextComponent::translate(name, &[])
             }
 
+            #[doc = r" Number of vanilla item ids; runtime items are numbered from here."]
+            pub const VANILLA_COUNT: u16 = #vanilla_count;
+
             #[doc = "Try to parse an item from a resource location string."]
             #[must_use]
             pub fn from_registry_key(name: &str) -> Option<&'static Self> {
                 let name = name.strip_prefix("minecraft:").unwrap_or(name);
                 match name {
                     #type_from_name
-                    _ => None
+                    _ => crate::runtime_registry::item_by_name(name)
                 }
             }
 
             #[doc = "Try to parse an item from a raw id."]
             #[must_use]
-            pub const fn from_id(id: u16) -> Option<&'static Self> {
+            pub fn from_id(id: u16) -> Option<&'static Self> {
                 match id {
                     #type_from_raw_id_arms
-                    _ => None
+                    _ => crate::runtime_registry::item(id)
                 }
             }
         }

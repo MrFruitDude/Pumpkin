@@ -246,10 +246,13 @@ impl BlockStateId {
     // depends on generated impl:
     // pub(crate) const STATE_COUNT: u16;
 
-    /// The total count of all registered block states.
+    /// The number of vanilla block states. Runtime (PML) states, if any were
+    /// registered, are numbered from here; see [`Self::registered`].
     pub const COUNT: u16 = Self::STATE_COUNT;
 
-    // SAFETY: There must never be a BlockStateId where self.0 >= BlockStateId::STATE_COUNT
+    // INVARIANT: every BlockStateId names a state: a vanilla one (< STATE_COUNT) or
+    // one minted by the runtime registry. `new` only accepts vanilla ids so it can
+    // stay `const`; ids read back from runtime data go through `registered`.
 
     #[inline]
     #[must_use]
@@ -269,6 +272,27 @@ impl BlockStateId {
         Self::AIR
     }
 
+    /// Accepts vanilla ids and ids of states the runtime registry has minted.
+    #[inline]
+    #[must_use]
+    pub fn registered(inner: u16) -> Option<Self> {
+        crate::runtime_registry::is_registered_state(inner).then_some(Self(inner))
+    }
+
+    /// Only for the runtime registry, which upholds the invariant.
+    #[inline]
+    #[must_use]
+    pub(crate) const fn from_raw(inner: u16) -> Self {
+        Self(inner)
+    }
+
+    /// Whether this is a runtime (PML) state rather than a vanilla one.
+    #[inline]
+    #[must_use]
+    pub const fn is_runtime(self) -> bool {
+        self.0 >= Self::STATE_COUNT
+    }
+
     #[inline(always)]
     #[must_use]
     pub const fn as_u16(self) -> u16 {
@@ -277,37 +301,37 @@ impl BlockStateId {
 
     #[inline]
     #[must_use]
-    pub const fn to_state(self) -> &'static BlockState {
+    pub fn to_state(self) -> &'static BlockState {
         BlockState::from_id(self)
     }
 
     #[inline]
     #[must_use]
-    pub const fn to_block_id(self) -> BlockId {
+    pub fn to_block_id(self) -> BlockId {
         BlockId::from_state_id(self)
     }
 
     #[inline]
     #[must_use]
-    pub const fn to_block(self) -> &'static Block {
+    pub fn to_block(self) -> &'static Block {
         Block::from_state_id(self)
     }
 
     #[inline]
     #[must_use]
-    pub const fn is_solid_render(self) -> bool {
+    pub fn is_solid_render(self) -> bool {
         self.to_state().is_solid_render()
     }
 
     #[inline]
     #[must_use]
-    pub const fn can_occlude(self) -> bool {
+    pub fn can_occlude(self) -> bool {
         self.to_state().can_occlude()
     }
 
     #[inline]
     #[must_use]
-    pub const fn has_analog_output_signal(self) -> bool {
+    pub fn has_analog_output_signal(self) -> bool {
         self.to_state().has_analog_output_signal()
     }
 

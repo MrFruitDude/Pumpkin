@@ -175,6 +175,12 @@ impl Server {
 
         let world_path = basic_config.get_world_path();
 
+        // Content registration (PML) closes before any world loads: saved chunks
+        // resolve block names against the frozen registry, and blocks whose mod is
+        // gone load as `pml:missing` placeholders. With no mods this freezes an
+        // empty registry.
+        pumpkin_data::runtime_registry::ensure_frozen();
+
         let block_registry = super::block::registry::default_registry();
 
         let level_info = match AnvilLevelInfo.read_world_info(&world_path) {
