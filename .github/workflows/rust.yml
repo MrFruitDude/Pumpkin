@@ -21,6 +21,9 @@ env:
   CARGO_TERM_COLOR: always
   CI_RUST_TOOLCHAIN_VER: ${{ inputs.rust_toolchain_version || 'stable' }}
   RUSTFLAGS: "-Dwarnings"
+  # rustc overflows its default stack compiling the generated pumpkin-data crate
+  # ("fatal runtime error: stack overflow" in clippy, SIGBUS in release builds).
+  RUST_MIN_STACK: "268435456"
 
 jobs:
   prepare:
