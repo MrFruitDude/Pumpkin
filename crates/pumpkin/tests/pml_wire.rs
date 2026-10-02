@@ -753,7 +753,9 @@ fn vanilla_protocol_bot_sees_carriers_and_server_driven_mining() {
         .enable_all()
         .build()
         .unwrap();
-    runtime.block_on(async {
+    // Time updates and keep-alives keep a connection busy forever, so a missed
+    // expectation would otherwise wait forever instead of failing.
+    let scenario = async {
         let mut basic = pumpkin_config::BasicConfiguration {
             default_level_name: dir.path().join("world").to_string_lossy().into_owned(),
             allow_nether: false,
@@ -896,6 +898,11 @@ fn vanilla_protocol_bot_sees_carriers_and_server_driven_mining() {
             seen.push(bot1.next_play().await);
         }
         drop(bot2);
+    };
+    runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(240), scenario)
+            .await
+            .expect("the end-to-end scenario did not finish within 240 s");
     });
     runtime.shutdown_background();
 }
