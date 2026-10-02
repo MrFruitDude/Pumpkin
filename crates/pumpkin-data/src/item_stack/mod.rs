@@ -40,6 +40,10 @@ pub struct ItemStack {
     pub item_count: u8,
     pub item: &'static Item,
     pub patch: Vec<(DataComponent, Option<Box<dyn DataComponentImpl>>)>,
+    /// Components read from disk that Pumpkin cannot write back itself: unknown ones,
+    /// ones it fails to parse and ones whose type does not serialize its data. They
+    /// are written back as they were read, so loading and saving an item keeps them.
+    pub unmodelled_components: Vec<(Box<str>, NbtTag)>,
 
     // unique ID for Bedrock network; don't serialize
     // Should always be a positive value for non-empty stacks
@@ -104,6 +108,7 @@ impl ItemStack {
             item_count,
             item,
             patch: Vec::new(),
+            unmodelled_components: Vec::new(),
 
             uid: ITEM_STACK_ID_GEN.next_id(),
         }
@@ -119,6 +124,7 @@ impl ItemStack {
             item_count,
             item,
             patch: component,
+            unmodelled_components: Vec::new(),
 
             uid: ITEM_STACK_ID_GEN.next_id(),
         }
@@ -133,6 +139,7 @@ impl ItemStack {
             item_count,
             item,
             patch: Vec::new(),
+            unmodelled_components: Vec::new(),
 
             uid: match NonZero::new(1) {
                 Some(v) => v,
@@ -265,6 +272,7 @@ impl ItemStack {
         item_count: 0,
         item: &Item::AIR,
         patch: Vec::new(),
+        unmodelled_components: Vec::new(),
 
         uid: NonZero::<i32>::MIN, // white lie - Bedrock `uid` is never sent if the stack is empty
     };
@@ -712,6 +720,15 @@ impl ItemStack {
             return false;
         }
 
+        if self.unmodelled_components.len() != other.unmodelled_components.len()
+            || !self
+                .unmodelled_components
+                .iter()
+                .all(|component| other.unmodelled_components.contains(component))
+        {
+            return false;
+        }
+
         for (id, data) in &self.patch {
             let mut not_found = true;
             'out: for (other_id, other_data) in &other.patch {
@@ -810,10 +827,27 @@ impl ItemStack {
 
         for (id, data) in &self.patch {
             if let Some(data) = data {
-                tag.put(id.to_name(), data.write_data());
+                match data.write_data() {
+                    // The type keeps none of its data, so write what was read.
+                    NbtTag::End => {
+                        if let Some((_, raw)) = self
+                            .unmodelled_components
+                            .iter()
+                            .find(|(name, _)| name.as_ref() == id.to_name())
+                        {
+                            tag.put(id.to_name(), raw.clone());
+                        }
+                    }
+                    data => tag.put(id.to_name(), data),
+                }
             } else {
                 let name = '!'.to_string() + id.to_name();
                 tag.put(name.as_str(), NbtCompound::new());
+            }
+        }
+        for (name, raw) in &self.unmodelled_components {
+            if !tag.has(name) && !tag.has(&format!("!{name}")) {
+                tag.put(name, raw.clone());
             }
         }
 
@@ -840,13 +874,34 @@ impl ItemStack {
         // Process any additional data in the components compound
         if let Some(tag) = compound.get_compound("components") {
             for (name, data) in &tag.child_tags {
-                if let Some(name) = name.strip_prefix("!") {
+                if let Some(removed) = name.strip_prefix("!") {
+                    if let Some(id) = DataComponent::try_from_name(removed) {
+                        item_stack.patch.push((id, None));
+                    } else {
+                        item_stack
+                            .unmodelled_components
+                            .push((name.clone(), data.clone()));
+                    }
+                    continue;
+                }
+                let Some(id) = DataComponent::try_from_name(name) else {
                     item_stack
-                        .patch
-                        .push((DataComponent::try_from_name(name)?, None));
-                } else {
-                    let id = DataComponent::try_from_name(name)?;
-                    item_stack.patch.push((id, Some(read_data(id, data)?)));
+                        .unmodelled_components
+                        .push((name.clone(), data.clone()));
+                    continue;
+                };
+                match read_data(id, data) {
+                    Some(component) => {
+                        if matches!(component.write_data(), NbtTag::End) {
+                            item_stack
+                                .unmodelled_components
+                                .push((id.to_name().into(), data.clone()));
+                        }
+                        item_stack.patch.push((id, Some(component)));
+                    }
+                    None => item_stack
+                        .unmodelled_components
+                        .push((id.to_name().into(), data.clone())),
                 }
             }
         }

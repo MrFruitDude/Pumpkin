@@ -24,13 +24,22 @@ fn read_text(tag: &NbtTag) -> Option<String> {
     read_component(tag).map(TextComponent::get_text)
 }
 
+/// Writes a filterable plain string. Vanilla rejects a text component here.
 fn text_tag(value: &str) -> NbtTag {
-    text_component_tag(&TextComponent::text(value.to_string()))
+    let mut compound = NbtCompound::new();
+    compound.put_string("raw", value.to_string());
+    NbtTag::Compound(compound)
 }
 
 fn text_component_tag(component: &TextComponent) -> NbtTag {
     let mut compound = NbtCompound::new();
-    compound.put("raw", NbtTag::Compound(component.0.to_nbt_compound()));
+    // Like vanilla, a plain text component is stored as a bare string.
+    compound.put(
+        "raw",
+        component
+            .0
+            .to_nbt_tag_for_version(&pumpkin_util::version::JavaMinecraftVersion::V_26_3),
+    );
     NbtTag::Compound(compound)
 }
 
