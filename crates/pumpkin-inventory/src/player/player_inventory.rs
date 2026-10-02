@@ -11,6 +11,7 @@ use crate::entity_equipment::EntityEquipment;
 use crate::screen_handler::InventoryPlayer;
 
 use crate::inventory::{Clearable, Inventory};
+use pumpkin_data::Enchantment;
 use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
@@ -68,6 +69,54 @@ impl PlayerInventory {
             selected_slot: AtomicU8::new(0),
             entity_equipment,
         }
+    }
+
+    /// Empties the inventory for a player death and returns what should drop.
+    ///
+    /// Vanilla `Player.dropEquipment` without `keepInventory`: items with Curse
+    /// of Vanishing are destroyed, then `Inventory.dropAll` drops the main
+    /// inventory followed by every equipment slot (off hand and armor), with
+    /// their components, durability included, unchanged.
+    pub fn take_death_drops(&self) -> Vec<ItemStack> {
+        let keep = |stack: &ItemStack| {
+            !stack.is_empty() && stack.get_enchantment_level(&Enchantment::VANISHING_CURSE) == 0
+        };
+        let mut drops = Vec::new();
+        {
+            let mut main = self
+                .main_inventory
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            for slot in main.iter_mut() {
+                let stack = std::mem::replace(slot, ItemStack::EMPTY.clone());
+                if keep(&stack) {
+                    drops.push(stack);
+                }
+            }
+        }
+        let mut equipment = self
+            .entity_equipment
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Vanilla `EquipmentSlot` order. The main hand is the selected hotbar
+        // slot, which the main inventory above already covered.
+        for slot in [
+            EquipmentSlot::OFF_HAND,
+            EquipmentSlot::FEET,
+            EquipmentSlot::LEGS,
+            EquipmentSlot::CHEST,
+            EquipmentSlot::HEAD,
+            EquipmentSlot::BODY,
+            EquipmentSlot::SADDLE,
+        ] {
+            if let Some(stack) = equipment.equipment.remove(&slot)
+                && keep(&stack)
+            {
+                drops.push(stack);
+            }
+        }
+        equipment.clear();
+        drops
     }
 
     /// Fast non-blocking count of an item across all main inventory slots.

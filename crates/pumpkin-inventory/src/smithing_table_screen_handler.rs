@@ -123,6 +123,11 @@ impl SmithingTableScreenHandler {
 }
 
 impl ScreenHandler for SmithingTableScreenHandler {
+    /// Vanilla: a double click never collects from the smithing result slot.
+    fn can_take_item_for_pick_all(&self, slot_index: usize) -> bool {
+        slot_index != 3
+    }
+
     fn get_behaviour(&self) -> &ScreenHandlerBehaviour {
         &self.behaviour
     }

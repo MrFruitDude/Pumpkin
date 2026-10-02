@@ -109,8 +109,9 @@ impl BlockBehaviour for DropperBlock {
         args: GetScreenHandlerFactoryArgs<'_>,
     ) -> Option<Box<dyn ScreenHandlerFactory>> {
         let block_entity = args.world.get_block_entity(args.position)?;
+        let custom_name = block_entity.custom_name();
         let inventory = block_entity.get_inventory()?;
-        Some(Box::new(DropperScreenFactory(inventory)))
+        crate::block::named_screen_factory(custom_name, Box::new(DropperScreenFactory(inventory)))
     }
 
     fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {

@@ -95,8 +95,12 @@ impl BlockBehaviour for ShulkerBoxBlock {
         args: GetScreenHandlerFactoryArgs<'_>,
     ) -> Option<Box<dyn ScreenHandlerFactory>> {
         let block_entity = args.world.get_block_entity(args.position)?;
+        let custom_name = block_entity.custom_name();
         let inventory = block_entity.get_inventory()?;
-        Some(Box::new(ShulkerBoxScreenFactory(inventory)))
+        crate::block::named_screen_factory(
+            custom_name,
+            Box::new(ShulkerBoxScreenFactory(inventory)),
+        )
     }
 
     fn get_comparator_output(&self, args: GetComparatorOutputArgs<'_>) -> Option<u8> {

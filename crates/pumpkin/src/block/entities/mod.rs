@@ -20,6 +20,7 @@ pub mod chest_like_block_entity;
 pub mod chiseled_bookshelf;
 pub mod command_block;
 pub mod comparator;
+pub mod container_name;
 pub mod daylight_detector;
 pub mod dropper;
 pub mod end_portal;
@@ -123,6 +124,14 @@ pub trait BlockEntity: Any + Send + Sync {
     }
 
     fn get_inventory(self: Arc<Self>) -> Option<Arc<dyn Inventory>> {
+        None
+    }
+
+    /// The name given to this block entity, e.g. with an anvil before placing
+    /// it. Containers use it as their window title.
+    ///
+    /// Mojang name: `Nameable.getCustomName`
+    fn custom_name(&self) -> Option<pumpkin_util::text::TextComponent> {
         None
     }
 
@@ -452,6 +461,57 @@ mod test {
     use pumpkin_nbt::compound::NbtCompound;
     use pumpkin_util::math::position::BlockPos;
     use std::sync::Arc;
+
+    /// Vanilla saves `CustomName` and `lock` on every container block entity
+    /// (`BaseContainerBlockEntity`), not just chests. A renamed barrel, shulker
+    /// box, hopper or furnace must keep its name through a chunk save.
+    #[tokio::test]
+    async fn container_names_and_locks_survive_a_chunk_round_trip() {
+        use pumpkin_nbt::tag::NbtTag;
+
+        let ids = [
+            "minecraft:barrel",
+            "minecraft:shulker_box",
+            "minecraft:hopper",
+            "minecraft:dispenser",
+            "minecraft:dropper",
+            "minecraft:crafter",
+            "minecraft:furnace",
+            "minecraft:blast_furnace",
+            "minecraft:smoker",
+            "minecraft:brewing_stand",
+        ];
+        let mut failures = Vec::new();
+        for id in ids {
+            let mut name = NbtCompound::new();
+            name.put_string("text", "Storage".to_string());
+            name.put_string("color", "gold".to_string());
+            let mut lock = NbtCompound::new();
+            lock.put_string("items", "minecraft:tripwire_hook".to_string());
+
+            let mut saved = NbtCompound::new();
+            saved.put_string("id", id.to_string());
+            saved.put_int("x", 0);
+            saved.put_int("y", 64);
+            saved.put_int("z", 0);
+            saved.put("CustomName", NbtTag::Compound(name.clone()));
+            saved.put("lock", NbtTag::Compound(lock.clone()));
+
+            let Some(block_entity) = block_entity_from_nbt(&saved) else {
+                failures.push(format!("{id}: not loaded"));
+                continue;
+            };
+            let mut written = NbtCompound::new();
+            block_entity.write_internal(&mut written);
+            if written.get("CustomName") != Some(&NbtTag::Compound(name)) {
+                failures.push(format!("{id}: CustomName lost on save"));
+            }
+            if written.get("lock") != Some(&NbtTag::Compound(lock)) {
+                failures.push(format!("{id}: lock lost on save"));
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
 
     /// A loaded block entity is serialized back into its chunk with
     /// `write_internal`, so whatever it holds has to survive that round trip or

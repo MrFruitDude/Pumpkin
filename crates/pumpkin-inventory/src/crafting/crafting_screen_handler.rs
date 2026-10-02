@@ -566,6 +566,11 @@ impl CraftingTableScreenHandler {
 impl RecipeFinderScreenHandler for CraftingTableScreenHandler {}
 
 impl ScreenHandler for CraftingTableScreenHandler {
+    /// Vanilla: a double click never collects from the crafting result slot.
+    fn can_take_item_for_pick_all(&self, slot_index: usize) -> bool {
+        slot_index != 0
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }

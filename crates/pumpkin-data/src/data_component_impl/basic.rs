@@ -452,14 +452,32 @@ impl DataComponentImpl for BaseColorImpl {
     default_impl!(BaseColor);
 }
 
+/// `minecraft:instrument`: a reference to an `instrument` registry entry, kept
+/// namespaced (`minecraft:seek_goat_horn`). Inline instrument definitions, which
+/// only commands and data packs can create, are not supported.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub struct InstrumentImpl;
+pub struct InstrumentImpl {
+    pub value: Cow<'static, str>,
+}
 impl InstrumentImpl {
-    pub const fn read_data(_data: &NbtTag) -> Option<Self> {
-        Some(Self)
+    pub fn read_data(data: &NbtTag) -> Option<Self> {
+        let name = data.extract_string()?;
+        Some(Self {
+            value: Cow::Owned(if name.contains(':') {
+                name.to_string()
+            } else {
+                format!("minecraft:{name}")
+            }),
+        })
     }
 }
 impl DataComponentImpl for InstrumentImpl {
+    fn write_data(&self) -> NbtTag {
+        NbtTag::String(self.value.clone().into_owned().into())
+    }
+    fn get_hash(&self) -> i32 {
+        get_str_hash(self.value.as_ref()) as i32
+    }
     default_impl!(Instrument);
 }
 

@@ -913,8 +913,14 @@ impl ToTokens for ItemComponents {
         if self.glider.is_some() {
             tokens.extend(quote! { (Glider, &GliderImpl), });
         }
-        if self.instrument.is_some() {
-            tokens.extend(quote! { (Instrument, &InstrumentImpl), });
+        if let Some(instrument) = &self.instrument {
+            let instrument = instrument
+                .as_str()
+                .expect("minecraft:instrument default must be a registry reference");
+            let instrument_lit = LitStr::new(instrument, Span::call_site());
+            tokens.extend(quote! {
+                (Instrument, &InstrumentImpl { value: Cow::Borrowed(#instrument_lit) }),
+            });
         }
         if let Some(model) = &self.item_model {
             let model_lit = LitStr::new(model, Span::call_site());

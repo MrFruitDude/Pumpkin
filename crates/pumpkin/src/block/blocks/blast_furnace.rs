@@ -101,14 +101,18 @@ impl BlockBehaviour for BlastFurnaceBlock {
         args: GetScreenHandlerFactoryArgs<'_>,
     ) -> Option<Box<dyn ScreenHandlerFactory>> {
         let block_entity = args.world.get_block_entity(args.position)?;
+        let custom_name = block_entity.custom_name();
         let inventory = block_entity.clone().get_inventory()?;
         let property_delegate = block_entity.clone().to_property_delegate()?;
         let experience_container = block_entity.to_experience_container()?;
-        Some(Box::new(BlastingFurnaceScreenFactory::new(
-            inventory,
-            property_delegate,
-            experience_container,
-        )))
+        crate::block::named_screen_factory(
+            custom_name,
+            Box::new(BlastingFurnaceScreenFactory::new(
+                inventory,
+                property_delegate,
+                experience_container,
+            )),
+        )
     }
 
     fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {

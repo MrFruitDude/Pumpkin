@@ -133,3 +133,7 @@ firework_rocket[fireworks={flight_duration:3,explosions:[{shape:"burst",colors:[
 potion[potion_contents={potion:"minecraft:swiftness"},custom_name="Speedy"]
 golden_carrot[custom_name={"text":"Carrot","italic":false}]
 debug_stick[debug_stick_state={"minecraft:oak_stairs":"facing"}]
+# non-default goat horn instruments (upstream issue 3113)
+goat_horn[instrument="minecraft:seek_goat_horn"]
+goat_horn[instrument="minecraft:yearn_goat_horn"]
+goat_horn[instrument="minecraft:admire_goat_horn"]

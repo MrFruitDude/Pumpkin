@@ -316,6 +316,11 @@ impl MerchantScreenHandler {
 }
 
 impl ScreenHandler for MerchantScreenHandler {
+    /// Vanilla `MerchantMenu`: a double click never collects items.
+    fn can_take_item_for_pick_all(&self, _slot_index: usize) -> bool {
+        false
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }

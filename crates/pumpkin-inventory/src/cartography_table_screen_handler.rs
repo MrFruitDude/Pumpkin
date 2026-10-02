@@ -118,6 +118,11 @@ impl CartographyTableScreenHandler {
 }
 
 impl ScreenHandler for CartographyTableScreenHandler {
+    /// Vanilla: a double click never collects from the cartography result slot.
+    fn can_take_item_for_pick_all(&self, slot_index: usize) -> bool {
+        slot_index != Self::RESULT_SLOT
+    }
+
     fn get_behaviour(&self) -> &ScreenHandlerBehaviour {
         &self.behaviour
     }

@@ -84,6 +84,11 @@ impl StonecutterScreenHandler {
 }
 
 impl ScreenHandler for StonecutterScreenHandler {
+    /// Vanilla: a double click never collects from the stonecutter result slot.
+    fn can_take_item_for_pick_all(&self, slot_index: usize) -> bool {
+        slot_index != 1
+    }
+
     fn get_behaviour(&self) -> &ScreenHandlerBehaviour {
         &self.behaviour
     }

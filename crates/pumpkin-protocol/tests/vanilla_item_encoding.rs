@@ -276,3 +276,65 @@ fn join_inventory_container_set_content_matches_vanilla() {
         "container_set_content differs from what vanilla 26.3 sends for the same inventory"
     );
 }
+
+/// The other direction: a creative-mode client sends the stack it put into a
+/// slot in `set_creative_mode_slot`, length-prefixed. Pumpkin has to read
+/// every stack a vanilla client can send, and read it as the same item vanilla
+/// saves. A stack Pumpkin cannot read kicks the client ("Failed to handle play
+/// packet", upstream issue 3108 for paintings); one it reads differently comes
+/// back to the client changed, like a goat horn turning into the default
+/// Ponder horn (upstream issue 3113).
+#[test]
+fn creative_slot_stacks_decode_like_vanilla() {
+    use pumpkin_protocol::ServerPacket;
+    use pumpkin_protocol::java::server::play::SSetCreativeSlot;
+
+    let mut failures = Vec::new();
+    let mut checked = 0;
+    for row in fixture_rows(ITEM_STACKS) {
+        let [spec, _, _, vanilla_delimited_hex] = row[..] else {
+            panic!("malformed fixture row: {row:?}");
+        };
+        checked += 1;
+        // Slot 36, the first hotbar slot, then the stack.
+        let mut payload = vec![0, 36];
+        payload.extend(hex_to_bytes(vanilla_delimited_hex));
+        let mut bytes = payload.as_slice();
+        let packet = match SSetCreativeSlot::read(&mut bytes, &JavaMinecraftVersion::V_26_3) {
+            Ok(packet) => packet,
+            Err(e) => {
+                failures.push(format!(
+                    "{spec}: set_creative_mode_slot does not decode: {e}"
+                ));
+                continue;
+            }
+        };
+        if !bytes.is_empty() {
+            failures.push(format!("{spec}: {} bytes left unread", bytes.len()));
+            continue;
+        }
+        // Written back, the stack Pumpkin read must be the one the client sent.
+        let decoded = ItemStackSerializer(Cow::Owned(packet.clicked_item.to_stack()));
+        let mut written = Vec::new();
+        if let Err(e) =
+            decoded.write_length_prefixed_with_version(&mut written, &JavaMinecraftVersion::V_26_3)
+        {
+            failures.push(format!("{spec}: decoded stack does not write: {e}"));
+            continue;
+        }
+        let ours = parse_delimited(&written);
+        let vanilla = parse_delimited(&hex_to_bytes(vanilla_delimited_hex));
+        if ours != vanilla {
+            failures.push(format!(
+                "{spec}\n    sent by vanilla: {vanilla:?}\n    read by pumpkin: {ours:?}"
+            ));
+        }
+    }
+    assert!(checked > 100, "fixture looks truncated: {checked} rows");
+    assert!(
+        failures.is_empty(),
+        "{} of {checked} item stacks sent by a vanilla 26.3 client are not read back as sent:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}

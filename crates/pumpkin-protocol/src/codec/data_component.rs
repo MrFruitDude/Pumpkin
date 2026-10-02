@@ -2694,14 +2694,23 @@ impl DataComponentCodec<Self> for BlockEntityDataImpl {
     }
 }
 
+// Vanilla: Instrument.STREAM_CODEC is a holder (registry id + 1, or 0 and an
+// inline instrument). The ids follow the instrument registry Pumpkin sends.
 impl DataComponentCodec<Self> for InstrumentImpl {
     fn serialize(&self, seq: &mut impl NetworkWriteExt) -> Result<(), WritingError> {
-        seq.write_var_int(&VarInt(0))
+        let instrument = pumpkin_data::instrument::Instrument::from_name(&self.value)
+            .ok_or_else(|| variant_error("instrument", &self.value))?;
+        write_holder_reference(instrument.id(), seq)
     }
 
     fn deserialize(seq: &mut impl NetworkReadExt) -> Result<Self, ReadingError> {
-        let _ = seq.get_var_int()?;
-        Ok(Self)
+        let id = read_holder_reference(seq)?;
+        let instrument = pumpkin_data::instrument::Instrument::all()
+            .get(id as usize)
+            .ok_or_else(|| ReadingError::Message(format!("unknown instrument id {id}")))?;
+        Ok(Self {
+            value: Cow::Owned(format!("minecraft:{}", instrument.to_name())),
+        })
     }
 }
 
