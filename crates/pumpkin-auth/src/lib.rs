@@ -5,6 +5,7 @@
 
 pub mod client;
 pub mod jwt;
+pub mod offline;
 
 pub use client::{client, client_builder};
 pub use p384;
