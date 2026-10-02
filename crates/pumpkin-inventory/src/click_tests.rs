@@ -294,7 +294,7 @@ fn throwing_a_crafting_result_crafts_once() {
     handler.on_slot_click(0, 0, SlotActionType::Throw, &player);
 
     assert_eq!(count(&handler, 1), 2, "one log is used per craft");
-    assert_eq!(player.crafted.load(Ordering::Relaxed) > 0, true);
+    assert!(player.crafted.load(Ordering::Relaxed) > 0);
     let dropped = player.dropped();
     assert_eq!(dropped.len(), 1);
     assert_eq!(dropped[0].0, Item::OAK_PLANKS.id);

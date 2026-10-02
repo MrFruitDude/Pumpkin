@@ -839,9 +839,7 @@ pub trait ScreenHandler: Send + Sync {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
 
-        if (expected != 1 || header != 2) && expected != header {
-            behaviour.reset_quick_craft();
-        } else if carried.is_empty() {
+        if ((expected != 1 || header != 2) && expected != header) || carried.is_empty() {
             behaviour.reset_quick_craft();
         } else if header == 0 {
             behaviour.quickcraft_type = drag_type;

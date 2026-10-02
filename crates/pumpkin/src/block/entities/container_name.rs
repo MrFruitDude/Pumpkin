@@ -146,7 +146,7 @@ mod tests {
         assert_eq!(written.get("CustomName"), Some(&NbtTag::Compound(styled)));
         assert_eq!(written.get("lock"), Some(&NbtTag::Compound(lock)));
         assert_eq!(
-            name.custom_name().map(|n| n.get_text()),
+            name.custom_name().map(TextComponent::get_text),
             Some("Ores".to_string())
         );
     }

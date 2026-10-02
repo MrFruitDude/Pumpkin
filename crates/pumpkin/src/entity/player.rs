@@ -4807,8 +4807,6 @@ impl Player {
             crate::entity::player::advancement::trigger::AdvancementTrigger::PlayerKilled,
         );
         crate::entity::mob::neutral::tell_neutral_mobs_player_died(self, &self.world());
-        let block_pos = self.position().to_block_pos();
-
         let keep_inventory = { self.world().level_info.load().game_rules.keep_inventory };
 
         if !keep_inventory {
