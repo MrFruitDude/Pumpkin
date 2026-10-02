@@ -1,30 +1,67 @@
-FROM alpine:3.24
+# syntax=docker/dockerfile:1
+#
+# Pumpkin server image, built from this repository's source (not from an
+# upstream release binary, so the image carries this fork's code).
+#
+#   docker compose up -d        # see docker-compose.yml and docs/hosting.md
+#
+# Stage 1 builds a static musl binary; stage 2 is a small Alpine runtime that
+# runs it as the non-root user `pumpkin` (UID/GID 2613) with /data as its
+# working directory.
 
-ARG TARGETARCH
-ARG PUMPKIN_TAG=nightly
+ARG RUST_IMAGE=rust:1-alpine
+ARG RUNTIME_IMAGE=alpine:3.24
 
-RUN apk add --no-cache curl ca-certificates && \
-    case "${TARGETARCH}" in \
-        "amd64") BIN_ARCH="X64" ;; \
-        "arm64") BIN_ARCH="ARM64" ;; \
-        *) echo "Unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
-    esac && \
-    curl -fsSL "https://github.com/Pumpkin-MC/Pumpkin/releases/download/${PUMPKIN_TAG}/pumpkin-${BIN_ARCH}-Linux-musl" \
-        -o /usr/local/bin/pumpkin && \
-    chmod +x /usr/local/bin/pumpkin && \
-    apk del curl
+FROM ${RUST_IMAGE} AS builder
 
-RUN addgroup -g 2613 pumpkin && \
-    adduser -u 2613 -G pumpkin -D -h /pumpkin pumpkin && \
-    chown -R pumpkin:pumpkin /pumpkin
+# ring and zstd-sys compile C; build.rs reads the commit hash with git.
+RUN apk add --no-cache build-base musl-dev git perl
 
-WORKDIR /pumpkin
+# rustc overflows its default stack compiling the generated pumpkin-data crate.
+ENV RUST_MIN_STACK=268435456 \
+    CARGO_TERM_COLOR=always
+
+WORKDIR /build
+COPY . .
+
+# The build context's .git can belong to another UID than the build user.
+RUN git config --global --add safe.directory '*'
+
+# Uses rust-toolchain.toml (latest stable) and the workspace's release profile.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/build/target \
+    cargo build --release --locked --bin pumpkin && \
+    install -Dm755 target/release/pumpkin /out/pumpkin
+
+FROM ${RUNTIME_IMAGE}
+
+# tzdata: honour TZ for log timestamps and backup names.
+RUN apk add --no-cache ca-certificates tzdata && \
+    addgroup -g 2613 pumpkin && \
+    adduser -u 2613 -G pumpkin -D -H -h /data pumpkin && \
+    mkdir -p /data /backups /import /etc/pumpkin && \
+    chown pumpkin:pumpkin /data /backups
+
+COPY --from=builder /out/pumpkin /usr/local/bin/pumpkin
+COPY docker/pumpkin.toml /etc/pumpkin/pumpkin.toml
+COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/pumpkin-entrypoint
+COPY --chmod=755 docker/backup.sh /usr/local/bin/pumpkin-backup
+
 USER pumpkin:pumpkin
+WORKDIR /data
+VOLUME ["/data", "/backups"]
 
-ENV RUST_BACKTRACE=1
-EXPOSE 25565
+ENV RUST_BACKTRACE=1 \
+    PUMPKIN_TELEMETRY=false \
+    PUMPKIN_BEDROCK=false
 
-ENTRYPOINT [ "pumpkin" ]
+# Java Edition only. Bedrock (19132/udp) is off by default and not exposed.
+EXPOSE 25565/tcp
 
-HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
-    CMD nc -z 127.0.0.1 25565 || exit 1
+# Healthy once something listens on TCP 25565 (0x63DD, state 0A = LISTEN).
+HEALTHCHECK --interval=15s --timeout=3s --start-period=60s --retries=3 \
+    CMD grep -Eq ':63DD [0-9A-F]+:0000 0A' /proc/net/tcp /proc/net/tcp6 || exit 1
+
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["/usr/local/bin/pumpkin-entrypoint"]

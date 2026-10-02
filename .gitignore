@@ -107,9 +107,14 @@ wepif.yml
 
 # docker-compose
 data/*
+/import/
+/backups/
+/pumpkin-image.tar.gz
 
 # project's configurations
 pumpkin.toml
+# ...except the defaults shipped in the Docker image
+!/docker/pumpkin.toml
 nethernet-key.der
 .pumpkin-server-id
 

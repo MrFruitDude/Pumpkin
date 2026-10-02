@@ -8,11 +8,17 @@
 !/crates/
 !/tools/
 !/assets/
-!/pumpkin.toml
+
+# Image defaults, entrypoint and backup scripts
+!/docker/
 
 # Allow build.rs to read git commit sha
 !/.git
 
-# Dependencies
+# Dependencies and toolchain
 !Cargo.lock
 !Cargo.toml
+!rust-toolchain.toml
+
+# Local build output never belongs in the context
+/crates/**/target
