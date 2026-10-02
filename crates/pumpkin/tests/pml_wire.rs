@@ -512,6 +512,15 @@ struct Bot {
     /// Fed by a reader task, so waiting on it with a timeout never cuts a frame.
     packets: tokio::sync::mpsc::UnboundedReceiver<(i32, Bytes)>,
     writer: OwnedWriteHalf,
+    /// Chunks received so far.
+    chunks: HashSet<(i32, i32)>,
+}
+
+/// What the end-to-end scenario is doing, for the message when it times out.
+static STAGE: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+fn stage(what: impl Into<String>) {
+    *STAGE.lock().unwrap() = what.into();
 }
 
 /// Forwards every frame from the server; ends when the connection closes.
@@ -575,7 +584,9 @@ impl Bot {
                 .await;
         } else if id == clientbound::play::LEVEL_CHUNK_WITH_LIGHT.0 {
             // Every chunk a vanilla client gets must be free of runtime ids.
-            assert_all_vanilla(&decode_chunk_sections(&payload).2);
+            let (x, z, sections) = decode_chunk_sections(&payload);
+            assert_all_vanilla(&sections);
+            self.chunks.insert((x, z));
         } else if id == clientbound::play::DISCONNECT.0 {
             panic!(
                 "disconnected by the server: {}",
@@ -600,7 +611,11 @@ impl Bot {
         let (read, writer) = stream.into_split();
         let (sender, packets) = tokio::sync::mpsc::unbounded_channel();
         tokio::spawn(read_frames(TCPNetworkDecoder::new(read), sender));
-        let mut bot = Self { packets, writer };
+        let mut bot = Self {
+            packets,
+            writer,
+            chunks: HashSet::new(),
+        };
 
         let mut handshake = Vec::new();
         handshake
@@ -797,6 +812,7 @@ fn vanilla_protocol_bot_sees_carriers_and_server_driven_mining() {
         tokio::spawn(async move { pumpkin.start().await });
 
         // Bot 1 joins; once it is in, a runtime block appears next to it.
+        stage("bot 1 joining");
         let mut bot1 = Bot::join(addr, "p2bot1").await;
         let player = loop {
             if let Some(player) = server.get_player_by_name("p2bot1") {
@@ -804,16 +820,27 @@ fn vanilla_protocol_bot_sees_carriers_and_server_driven_mining() {
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         };
-        // The spawn position settles once the spawn chunks are generated (the
-        // server may teleport more than once): wait until it stops moving.
+        // The spawn position settles once the spawn chunks are generated, which
+        // takes a while in a debug build on a busy CI runner: wait until bot 1
+        // holds the chunk it stands in and its position has not moved for 3 s.
         let mut feet = player.position();
+        let mut still_since = tokio::time::Instant::now();
         loop {
-            bot1.pump(Duration::from_millis(1500)).await;
+            stage(format!(
+                "bot 1 waiting for its spawn to settle at {feet:?}, {} chunks so far",
+                bot1.chunks.len()
+            ));
+            bot1.pump(Duration::from_millis(500)).await;
             let now = player.position();
-            if now == feet {
+            if now != feet {
+                feet = now;
+                still_since = tokio::time::Instant::now();
+                continue;
+            }
+            let chunk = ((feet.x.floor() as i32) >> 4, (feet.z.floor() as i32) >> 4);
+            if bot1.chunks.contains(&chunk) && still_since.elapsed() >= Duration::from_secs(3) {
                 break;
             }
-            feet = now;
         }
         let target = BlockPos::new(
             feet.x.floor() as i32 + 1,
@@ -827,6 +854,7 @@ fn vanilla_protocol_bot_sees_carriers_and_server_driven_mining() {
             state,
             pumpkin_world::world::BlockFlags::NOTIFY_ALL,
         );
+        stage(format!("bot 1 waiting for the block update at {target:?}"));
         let mut seen = Vec::new();
         assert_eq!(
             bot1.block_update_at(target, &mut seen).await,
@@ -835,7 +863,9 @@ fn vanilla_protocol_bot_sees_carriers_and_server_driven_mining() {
         );
 
         // Bot 2 joins afterwards and gets the block in its chunk data.
+        stage("bot 2 joining");
         let mut bot2 = Bot::join(addr, "p2bot2").await;
+        stage(format!("bot 2 waiting for the chunk holding {target:?}"));
         let sections = bot2.chunk_at(target).await;
         let (s, i) = section_index(
             target.0.x.rem_euclid(16) as usize,
@@ -849,6 +879,15 @@ fn vanilla_protocol_bot_sees_carriers_and_server_driven_mining() {
 
         // Bot 1 mines the block like a vanilla client: it only sends "start"
         // and leaves the finish to the server.
+        assert!(
+            player.can_interact_with_block_at(&target, 0.0),
+            "{target:?} is out of reach of {:?}",
+            player.position()
+        );
+        stage(format!(
+            "bot 1 mining {target:?} from {:?}",
+            player.position()
+        ));
         let mut action = Vec::new();
         action.write_var_int(&VarInt(0)).unwrap();
         action.write_i64_be(target.as_long()).unwrap();
@@ -894,6 +933,7 @@ fn vanilla_protocol_bot_sees_carriers_and_server_driven_mining() {
         assert!(player.world().get_block_state(&target).is_air());
 
         // With the break the client gets its real break speed back.
+        stage("bot 1 waiting for its block_break_speed to be restored");
         while frozen_states(&seen).last() != Some(&false) {
             seen.push(bot1.next_play().await);
         }
@@ -902,7 +942,12 @@ fn vanilla_protocol_bot_sees_carriers_and_server_driven_mining() {
     runtime.block_on(async {
         tokio::time::timeout(Duration::from_secs(240), scenario)
             .await
-            .expect("the end-to-end scenario did not finish within 240 s");
+            .unwrap_or_else(|_| {
+                panic!(
+                    "the end-to-end scenario did not finish within 240 s; stuck at: {}",
+                    STAGE.lock().unwrap()
+                )
+            });
     });
     runtime.shutdown_background();
 }
