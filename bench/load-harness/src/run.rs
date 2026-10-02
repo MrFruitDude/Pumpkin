@@ -84,10 +84,6 @@ pub struct RunArgs {
     /// Keep the run directory (world, logs) instead of deleting it afterwards.
     #[arg(long)]
     pub keep_run_dir: bool,
-    /// Mark the run invalid when processes other than the server and the bots used more than
-    /// this much CPU (% of one core, window mean). Other load on the host skews every metric.
-    #[arg(long, default_value_t = 50.0)]
-    pub max_host_other_cpu_pct: f64,
 }
 
 /// One `tick query` answer, scraped from the server console.
@@ -568,6 +564,8 @@ pub async fn run(mut args: RunArgs) -> eyre::Result<PathBuf> {
     let run_id = format!("{target_name}-{}bots-{started_at_ms}", args.bots);
     let dir = args.work_root.join(&run_id);
     prepare_dir(&args, &dir)?;
+    // Keep Spotlight from indexing every region file the server writes (macOS only).
+    let _ = std::fs::write(args.work_root.join(".metadata_never_index"), "");
     std::fs::create_dir_all(&args.out_dir)?;
     let log = Arc::new(Mutex::new(std::fs::File::create(
         dir.join("server-console.log"),
@@ -766,12 +764,6 @@ pub async fn run(mut args: RunArgs) -> eyre::Result<PathBuf> {
     }
     if summary.tick_queries == 0 {
         invalid_reasons.push("no `tick query` answers parsed from the server console".into());
-    }
-    if summary.host_other_cpu_pct_mean > args.max_host_other_cpu_pct {
-        invalid_reasons.push(format!(
-            "other processes used {:.0}% of a core on average (limit {:.0}%)",
-            summary.host_other_cpu_pct_mean, args.max_host_other_cpu_pct
-        ));
     }
     if samples.len() + 2 < args.measure_secs as usize {
         invalid_reasons.push(format!("only {} process samples", samples.len()));

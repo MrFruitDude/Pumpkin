@@ -76,10 +76,21 @@ jobs:
           import json, glob, sys
           run = json.load(open(glob.glob("smoke/raw/*.json")[0]))
           print(json.dumps(run["work"], indent=1))
-          if run["invalid_reasons"]:
-              sys.exit("smoke run invalid: " + "; ".join(run["invalid_reasons"]))
+          # The smoke run checks that the harness works end to end on a debug build. Server-side
+          # problems it surfaces (such as a bot getting kicked) are reported, not gated on.
+          for reason in run["invalid_reasons"]:
+              print(f"::warning::smoke run would not count as a measurement: {reason}")
+          problems = []
+          if run["work"]["bots_online_start"] < run["params"]["bots"]:
+              problems.append("not every bot was online when measuring started")
+          if run["summary"]["tick_queries"] == 0:
+              problems.append("no tick query answers parsed")
           if run["work"]["chats_echoed"] == 0:
-              sys.exit("no chat round trips")
+              problems.append("no chat round trips")
+          if not run["samples"]:
+              problems.append("no process samples")
+          if problems:
+              sys.exit("smoke run failed: " + "; ".join(problems))
           EOF
       - if: always()
         uses: actions/upload-artifact@v7

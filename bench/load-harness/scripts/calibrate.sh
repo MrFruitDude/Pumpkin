@@ -4,7 +4,7 @@
 # load) hits every target alike instead of biasing whichever ran last.
 #
 # Usage: scripts/calibrate.sh <out-dir> [targets...]
-#   env: BOTS="10 50" REPEATS=3 WARMUP=60 MEASURE=120 HEAP=2G COOLDOWN=15
+#   env: BOTS="10 50" REPEATS=3 WARMUP=60 MEASURE=120 HEAP=2G COOLDOWN=15 MAX_HOST_OTHER=<unset: no filter>
 #        PUMPKIN_BIN=../../target/release/pumpkin PUMPKIN_LABEL=<label> WORK_ROOT=<scratch dir>
 set -euo pipefail
 
@@ -57,4 +57,4 @@ for rep in $(seq 1 "$REPEATS"); do
     done
 done
 
-"$harness" report "$out/raw" --out "$out/report"
+"$harness" report "$out/raw" --out "$out/report"${MAX_HOST_OTHER:+ --max-host-other-cpu-pct "$MAX_HOST_OTHER"}
