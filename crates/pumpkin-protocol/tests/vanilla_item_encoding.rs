@@ -1,7 +1,7 @@
 //! Item stacks must reach a vanilla 26.3 client in a form it can decode.
 //!
 //! A client that cannot decode one item in its inventory is disconnected with
-//! "Failed to decode packet 'clientbound/minecraft:container_set_content'"
+//! `Failed to decode packet 'clientbound/minecraft:container_set_content'`
 //! right after joining (upstream issue 3782), or with `container_set_slot` the
 //! moment such an item is picked up.
 //!
@@ -11,7 +11,10 @@
 //! vanilla puts on the wire for that stack. These tests load the NBT the way
 //! Pumpkin does and require Pumpkin to write exactly vanilla's bytes.
 
+#![allow(clippy::expect_used, clippy::panic)]
+
 use std::borrow::Cow;
+use std::fmt::Write as _;
 
 use pumpkin_data::data_component::DataComponent;
 use pumpkin_data::item_stack::ItemStack;
@@ -36,7 +39,10 @@ fn hex_to_bytes(hex: &str) -> Vec<u8> {
 }
 
 fn bytes_to_hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    bytes.iter().fold(String::new(), |mut hex, b| {
+        let _ = write!(hex, "{b:02x}");
+        hex
+    })
 }
 
 /// Loads an item stack from vanilla's saved NBT, as Pumpkin does for player data.
