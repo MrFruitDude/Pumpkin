@@ -59,14 +59,6 @@ impl BlockBehaviour for CandleBlock {
                     }
 
                     properties.lit = was_lit;
-
-                    args.world.set_block_state(
-                        args.position,
-                        properties.to_state_id(args.block),
-                        BlockFlags::NOTIFY_ALL,
-                    );
-
-                    BlockActionResult::Consume
                 }
                 _ => {
                     if properties.lit {
@@ -74,16 +66,16 @@ impl BlockBehaviour for CandleBlock {
                     } else {
                         return BlockActionResult::Pass;
                     }
-
-                    args.world.set_block_state(
-                        args.position,
-                        properties.to_state_id(args.block),
-                        BlockFlags::NOTIFY_ALL,
-                    );
-
-                    BlockActionResult::Consume
                 }
             }
+
+            args.world.set_block_state(
+                args.position,
+                properties.to_state_id(args.block),
+                BlockFlags::NOTIFY_ALL,
+            );
+
+            BlockActionResult::Consume
         }
     }
 
