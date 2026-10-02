@@ -740,6 +740,74 @@ mod test {
     }
 
     #[test]
+    fn vanilla_26_3_level_dat_survives_save_and_reload() {
+        let temp_dir = TempDir::new().unwrap();
+        let fixtures =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/tests/vanilla_26_3");
+        fs::copy(
+            fixtures.join("level.dat"),
+            temp_dir.path().join(LEVEL_DAT_FILE_NAME),
+        )
+        .unwrap();
+        let data_dir = minecraft_data_dir(temp_dir.path());
+        fs::create_dir_all(&data_dir).unwrap();
+        fs::copy(
+            fixtures.join("world_gen_settings.dat"),
+            data_dir.join("world_gen_settings.dat"),
+        )
+        .unwrap();
+        let vanilla_root = read_level_dat(temp_dir.path());
+
+        let loaded = AnvilLevelInfo
+            .read_world_info(temp_dir.path())
+            .expect("a vanilla 26.3 level.dat loads");
+        assert_eq!(loaded.world_gen_settings.seed, 12345);
+        assert_eq!(loaded.level_name, "world");
+
+        AnvilLevelInfo
+            .write_world_info(&loaded, temp_dir.path())
+            .unwrap();
+        let reloaded = AnvilLevelInfo.read_world_info(temp_dir.path()).unwrap();
+        let saved_root = read_level_dat(temp_dir.path());
+
+        assert_eq!(
+            reloaded.world_gen_settings.seed,
+            loaded.world_gen_settings.seed
+        );
+        assert_eq!(
+            (reloaded.spawn_x, reloaded.spawn_y, reloaded.spawn_z),
+            (loaded.spawn_x, loaded.spawn_y, loaded.spawn_z)
+        );
+        let vanilla_data = vanilla_root.get_compound("Data").unwrap();
+        let saved_data = saved_root.get_compound("Data").unwrap();
+        assert_eq!(
+            saved_data.get_int("DataVersion"),
+            vanilla_data.get_int("DataVersion")
+        );
+        for key in ["ServerBrands", "version_history", "difficulty_settings"] {
+            assert_eq!(saved_data.get(key), vanilla_data.get(key), "{key} changed");
+        }
+        // Vanilla keeps DataVersion next to `data`, and rejects world_clocks.dat
+        // when it is inside.
+        for file in [
+            "world_clocks.dat",
+            "game_rules.dat",
+            "world_gen_settings.dat",
+        ] {
+            let root = read_gzip_compound_tag(File::open(data_dir.join(file)).unwrap()).unwrap();
+            assert_eq!(
+                root.get_int("DataVersion"),
+                vanilla_data.get_int("DataVersion"),
+                "{file}"
+            );
+            assert!(
+                !root.get_compound("data").unwrap().has("DataVersion"),
+                "{file}"
+            );
+        }
+    }
+
+    #[test]
     fn rewrite_level_dat_keeps_unmanaged_tags() {
         let temp_dir = TempDir::new().unwrap();
         write_level_dat(temp_dir.path(), converted_level_dat(Some(42)));
@@ -790,11 +858,9 @@ mod test {
 
         let game_rules_path = minecraft_data_dir(temp_dir.path()).join("game_rules.dat");
         let game_rules = read_gzip_compound_tag(File::open(game_rules_path).unwrap()).unwrap();
+        // Vanilla keeps DataVersion at the root, next to `data`.
         assert_eq!(
-            game_rules
-                .get_compound("data")
-                .unwrap()
-                .get_int("DataVersion"),
+            game_rules.get_int("DataVersion"),
             Some(MAXIMUM_SUPPORTED_WORLD_DATA_VERSION)
         );
     }

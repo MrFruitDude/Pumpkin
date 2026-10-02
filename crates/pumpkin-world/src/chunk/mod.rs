@@ -82,6 +82,9 @@ pub struct ChunkData {
     pub dirty: AtomicBool,
     pub inhabited_time: AtomicU64,
     pub custom_data: std::sync::Mutex<NbtCompound>,
+    /// Top-level chunk tags Pumpkin does not model (`structures`, `PostProcessing`,
+    /// `LastUpdate`, ...). Written back as they were read so a save does not drop them.
+    pub unmodelled_nbt: NbtCompound,
 }
 
 pub struct ChunkEntityData {
@@ -642,6 +645,7 @@ impl ChunkData {
             dirty: std::sync::atomic::AtomicBool::new(false),
             inhabited_time: std::sync::atomic::AtomicU64::new(0),
             custom_data: std::sync::Mutex::new(NbtCompound::new()),
+            unmodelled_nbt: NbtCompound::new(),
         }
     }
 
