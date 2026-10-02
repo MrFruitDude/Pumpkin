@@ -62,7 +62,10 @@ pub struct RunArgs {
     pub view_distance: u8,
     #[arg(long, default_value_t = 8)]
     pub simulation_distance: u8,
-    #[arg(long, default_value_t = 25_599)]
+    /// Server port; 0 picks a free one. Either way the port is checked to be free on both the
+    /// wildcard and the loopback address first, because another process bound to 127.0.0.1
+    /// would silently receive the bots instead of the server under test.
+    #[arg(long, default_value_t = 0)]
     pub port: u16,
     /// Java heap for -Xms and -Xmx (vanilla and NeoForge).
     #[arg(long, default_value = "2G")]
@@ -81,6 +84,10 @@ pub struct RunArgs {
     /// Keep the run directory (world, logs) instead of deleting it afterwards.
     #[arg(long)]
     pub keep_run_dir: bool,
+    /// Mark the run invalid when processes other than the server and the bots used more than
+    /// this much CPU (% of one core, window mean). Other load on the host skews every metric.
+    #[arg(long, default_value_t = 50.0)]
+    pub max_host_other_cpu_pct: f64,
 }
 
 /// One `tick query` answer, scraped from the server console.
@@ -99,6 +106,9 @@ pub struct ProcSample {
     /// CPU used since the previous sample, as a percentage of one core.
     pub cpu_pct: f64,
     pub rss_mb: f64,
+    /// CPU used by everything except the server and the bots, % of one core.
+    #[serde(default)]
+    pub host_other_cpu_pct: f64,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -116,6 +126,8 @@ pub struct Summary {
     pub rss_mb_mean: f64,
     pub rss_mb_peak: f64,
     pub bot_cpu_pct_mean: f64,
+    #[serde(default)]
+    pub host_other_cpu_pct_mean: f64,
     pub chat_rtt_ms_p50: Option<f64>,
     pub chat_rtt_ms_p99: Option<f64>,
 }
@@ -194,6 +206,8 @@ impl Host {
 #[derive(Default)]
 struct ConsoleState {
     ready: bool,
+    /// Bots the server itself logged as joined; proves they reached this server.
+    bots_joined: usize,
     pending: TickQuery,
     queries: Vec<TickQuery>,
     collect_queries: bool,
@@ -201,6 +215,7 @@ struct ConsoleState {
 
 struct ConsolePatterns {
     ready: Regex,
+    joined: Regex,
     avg: Regex,
     percentiles: Regex,
     ansi: Regex,
@@ -214,6 +229,7 @@ impl ConsolePatterns {
         };
         Ok(Self {
             ready: Regex::new(ready)?,
+            joined: Regex::new(r"\bbot_\d+ joined the game")?,
             // en_us `commands.tick.query.rate.running` / `.sprinting`.
             avg: Regex::new(r"Average time per tick: ([0-9.]+) ?ms")?,
             // en_us `commands.tick.query.percentiles`.
@@ -226,6 +242,9 @@ impl ConsolePatterns {
         let line = self.ansi.replace_all(raw, "");
         if self.ready.is_match(&line) {
             state.ready = true;
+        }
+        if self.joined.is_match(&line) {
+            state.bots_joined += 1;
         }
         if !state.collect_queries {
             return;
@@ -459,8 +478,52 @@ impl ProcSampler {
             at_ms: now_ms(),
             cpu_pct: cpu_ms.saturating_sub(prev_cpu) as f64 / wall_ms * 100.0,
             rss_mb,
+            host_other_cpu_pct: 0.0,
         })
     }
+}
+
+/// Whole-machine CPU use, as a percentage of one core.
+struct HostSampler {
+    sys: System,
+}
+
+impl HostSampler {
+    fn new() -> Self {
+        let mut sys = System::new();
+        sys.refresh_cpu_usage();
+        Self { sys }
+    }
+
+    fn busy_pct(&mut self) -> f64 {
+        self.sys.refresh_cpu_usage();
+        f64::from(self.sys.global_cpu_usage()) * self.sys.cpus().len() as f64
+    }
+}
+
+/// Binding both addresses catches a process that holds only the loopback address, which the
+/// server under test could still bind past on the wildcard.
+fn port_is_free(port: u16) -> bool {
+    std::net::TcpListener::bind(("0.0.0.0", port)).is_ok()
+        && std::net::TcpListener::bind(("127.0.0.1", port)).is_ok()
+}
+
+fn choose_port(requested: u16) -> eyre::Result<u16> {
+    if requested != 0 {
+        if !port_is_free(requested) {
+            bail!("port {requested} is already in use on this host");
+        }
+        return Ok(requested);
+    }
+    for _ in 0..20 {
+        let port = std::net::TcpListener::bind(("0.0.0.0", 0))?
+            .local_addr()?
+            .port();
+        if port_is_free(port) {
+            return Ok(port);
+        }
+    }
+    bail!("could not find a free port")
 }
 
 async fn wait_for(
@@ -498,7 +561,8 @@ fn client_tps(start: &BotsSnapshot, end: &BotsSnapshot) -> Option<f64> {
     (!rates.is_empty()).then(|| mean(&rates))
 }
 
-pub async fn run(args: RunArgs) -> eyre::Result<PathBuf> {
+pub async fn run(mut args: RunArgs) -> eyre::Result<PathBuf> {
+    args.port = choose_port(args.port)?;
     let started_at_ms = now_ms();
     let target_name = format!("{:?}", args.target).to_lowercase();
     let run_id = format!("{target_name}-{}bots-{started_at_ms}", args.bots);
@@ -576,12 +640,19 @@ pub async fn run(args: RunArgs) -> eyre::Result<PathBuf> {
                 joined.connection_failures
             );
         }
+        // The join lines can trail the client's spawn slightly.
+        wait_for(Duration::from_secs(10), &mut server, "the server to log every bot joining", || {
+            console.lock().bots_joined >= args.bots
+        })
+        .await
+        .wrap_err("bots spawned but the server under test did not see them all join; is another process on the port?")?;
         let bots_all_joined_secs = t0.elapsed().as_secs_f64();
         eprintln!("[{run_id}] all bots joined after {bots_all_joined_secs:.1}s; warming up {}s", args.warmup_secs);
         tokio::time::sleep(Duration::from_secs(args.warmup_secs)).await;
 
         let mut server_sampler = ProcSampler::new(server_pid);
         let mut bots_sampler = ProcSampler::new(bots_pid);
+        let mut host_sampler = HostSampler::new();
         server_sampler.sample();
         bots_sampler.sample();
         let start = BotsSnapshot::read(&snapshot_path)?;
@@ -600,8 +671,13 @@ pub async fn run(args: RunArgs) -> eyre::Result<PathBuf> {
                 next_query += Duration::from_secs(args.tick_query_secs);
             }
             tick.tick().await;
-            samples.extend(server_sampler.sample());
-            bot_cpu.extend(bots_sampler.sample().map(|s| s.cpu_pct));
+            let host_busy = host_sampler.busy_pct();
+            let bot = bots_sampler.sample().map(|s| s.cpu_pct);
+            if let Some(mut sample) = server_sampler.sample() {
+                sample.host_other_cpu_pct = (host_busy - sample.cpu_pct - bot.unwrap_or(0.0)).max(0.0);
+                samples.push(sample);
+            }
+            bot_cpu.extend(bot);
             if let Some(status) = server.try_wait()? {
                 bail!("server exited during measurement ({status})");
             }
@@ -668,6 +744,12 @@ pub async fn run(args: RunArgs) -> eyre::Result<PathBuf> {
         rss_mb_mean: mean(&rss),
         rss_mb_peak: rss.iter().copied().fold(0.0, f64::max),
         bot_cpu_pct_mean: mean(&bot_cpu),
+        host_other_cpu_pct_mean: mean(
+            &samples
+                .iter()
+                .map(|s| s.host_other_cpu_pct)
+                .collect::<Vec<_>>(),
+        ),
         chat_rtt_ms_p50: (!rtts.is_empty()).then(|| percentile(&rtts, 50.0)),
         chat_rtt_ms_p99: (!rtts.is_empty()).then(|| percentile(&rtts, 99.0)),
     };
@@ -684,6 +766,12 @@ pub async fn run(args: RunArgs) -> eyre::Result<PathBuf> {
     }
     if summary.tick_queries == 0 {
         invalid_reasons.push("no `tick query` answers parsed from the server console".into());
+    }
+    if summary.host_other_cpu_pct_mean > args.max_host_other_cpu_pct {
+        invalid_reasons.push(format!(
+            "other processes used {:.0}% of a core on average (limit {:.0}%)",
+            summary.host_other_cpu_pct_mean, args.max_host_other_cpu_pct
+        ));
     }
     if samples.len() + 2 < args.measure_secs as usize {
         invalid_reasons.push(format!("only {} process samples", samples.len()));
@@ -789,6 +877,19 @@ mod tests {
             (q.mspt_avg, q.p50, q.p95, q.p99),
             (3.57, Some(3.05), Some(6.4), Some(19.79))
         );
+    }
+
+    #[test]
+    fn counts_bot_joins() {
+        let state = parse(
+            Target::Vanilla,
+            &[
+                "[20:02:45] [Server thread/INFO]: bot_000 joined the game",
+                "[20:02:45] [Server thread/INFO]: notabot_1 joined the game",
+                "\x1b[2m20:18:59\x1b[0m  INFO bot_001 joined the game",
+            ],
+        );
+        assert_eq!(state.bots_joined, 2);
     }
 
     #[test]

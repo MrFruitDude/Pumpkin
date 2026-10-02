@@ -46,6 +46,14 @@ const METRICS: &[(&str, &str, Getter)] = &[
     ("chat_rtt_ms_p99", "Chat RTT p99 (ms)", |s| {
         s.chat_rtt_ms_p99
     }),
+    ("bot_cpu_pct_mean", "Bot swarm CPU (% of 1 core)", |s| {
+        Some(s.bot_cpu_pct_mean)
+    }),
+    (
+        "host_other_cpu_pct_mean",
+        "Other host CPU (% of 1 core)",
+        |s| Some(s.host_other_cpu_pct_mean),
+    ),
 ];
 
 #[derive(Serialize)]
