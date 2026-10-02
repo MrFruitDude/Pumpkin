@@ -3353,6 +3353,7 @@ dependencies = [
  "indexmap",
  "libc",
  "libloading",
+ "md5",
  "notify",
  "num-bigint 0.5.1",
  "ordered-float",
