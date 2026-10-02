@@ -45,6 +45,8 @@ FULL_REBUILD_PATHS = {
 RUST_CI_IGNORED_ROOTS = {
     ".github/ISSUE_TEMPLATE",
     ".devcontainer",
+    # Standalone crate with its own workspace and workflow (bench-harness.yml).
+    "bench",
     "docs",
 }
 
@@ -52,6 +54,7 @@ RUST_CI_IGNORED_FILES = {
     ".github/dependabot.yml",
     ".github/FUNDING.yml",
     ".github/PULL_REQUEST_TEMPLATE.md",
+    ".github/workflows/bench-harness.yml",
     ".github/workflows/nix.yml",
     ".github/workflows/docker.yml",
     ".github/workflows/release.yml",
