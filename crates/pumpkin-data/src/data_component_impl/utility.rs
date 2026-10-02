@@ -315,14 +315,35 @@ impl DataComponentImpl for MapIdImpl {
     default_impl!(MapId);
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub struct MapDecorationsImpl;
+/// `minecraft:map_decorations` is not network-synchronized in vanilla, so it travels as the NBT of
+/// its persistent codec. The tag is kept as read; `None` is the vanilla default
+/// (an empty compound).
+#[derive(Clone, Debug, PartialEq)]
+pub struct MapDecorationsImpl {
+    pub decorations: Option<NbtTag>,
+}
 impl MapDecorationsImpl {
-    pub const fn read_data(_data: &NbtTag) -> Option<Self> {
-        Some(Self)
+    #[must_use]
+    pub fn read_data(data: &NbtTag) -> Option<Self> {
+        Some(Self {
+            // Older Pumpkin builds saved this component as an end tag.
+            decorations: (!matches!(data, NbtTag::End)).then(|| data.clone()),
+        })
+    }
+
+    /// The persistent (NBT) form of this component, used both for saving and
+    /// on the network.
+    #[must_use]
+    pub fn to_nbt(&self) -> NbtTag {
+        self.decorations
+            .clone()
+            .unwrap_or_else(|| NbtTag::Compound(NbtCompound::new()))
     }
 }
 impl DataComponentImpl for MapDecorationsImpl {
+    fn write_data(&self) -> NbtTag {
+        self.to_nbt()
+    }
     default_impl!(MapDecorations);
 }
 
@@ -602,14 +623,8 @@ impl FireworkExplosionImpl {
     pub fn read_data(tag: &NbtTag) -> Option<Self> {
         let compound = tag.extract_compound()?;
         let shape = FireworkExplosionShape::from_name(compound.get_string("shape")?)?;
-        let colors = compound
-            .get_int_array("colors")
-            .map(|v| v.to_vec())
-            .unwrap_or_default();
-        let fade_colors = compound
-            .get_int_array("fade_colors")
-            .map(|v| v.to_vec())
-            .unwrap_or_default();
+        let colors = read_color_list(compound, "colors");
+        let fade_colors = read_color_list(compound, "fade_colors");
         let has_trail = compound.get_bool("has_trail").unwrap_or(false);
         let has_twinkle = compound.get_bool("has_twinkle").unwrap_or(false);
         Some(Self {
@@ -619,6 +634,14 @@ impl FireworkExplosionImpl {
             has_trail,
             has_twinkle,
         })
+    }
+}
+/// Vanilla writes firework colors as a list of ints; older data used an int array.
+fn read_color_list(compound: &NbtCompound, key: &str) -> Vec<i32> {
+    match compound.get(key) {
+        Some(NbtTag::IntArray(colors)) => colors.to_vec(),
+        Some(NbtTag::List(colors)) => colors.iter().filter_map(NbtTag::extract_int).collect(),
+        _ => Vec::new(),
     }
 }
 impl DataComponentImpl for FireworkExplosionImpl {
@@ -871,13 +894,34 @@ impl DataComponentImpl for JukeboxPlayableImpl {
     default_impl!(JukeboxPlayable);
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub struct RecipesImpl;
+/// `minecraft:recipes` is not network-synchronized in vanilla, so it travels as the NBT of
+/// its persistent codec. The tag is kept as read; `None` is the vanilla default
+/// (an empty list).
+#[derive(Clone, Debug, PartialEq)]
+pub struct RecipesImpl {
+    pub recipes: Option<NbtTag>,
+}
 impl RecipesImpl {
-    pub const fn read_data(_data: &NbtTag) -> Option<Self> {
-        Some(Self)
+    #[must_use]
+    pub fn read_data(data: &NbtTag) -> Option<Self> {
+        Some(Self {
+            // Older Pumpkin builds saved this component as an end tag.
+            recipes: (!matches!(data, NbtTag::End)).then(|| data.clone()),
+        })
+    }
+
+    /// The persistent (NBT) form of this component, used both for saving and
+    /// on the network.
+    #[must_use]
+    pub fn to_nbt(&self) -> NbtTag {
+        self.recipes
+            .clone()
+            .unwrap_or_else(|| NbtTag::List(Vec::new()))
     }
 }
 impl DataComponentImpl for RecipesImpl {
+    fn write_data(&self) -> NbtTag {
+        self.to_nbt()
+    }
     default_impl!(Recipes);
 }

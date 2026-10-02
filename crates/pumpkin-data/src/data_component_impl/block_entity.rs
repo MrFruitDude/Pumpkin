@@ -47,15 +47,58 @@ impl DataComponentImpl for EntityDataImpl {
     default_impl!(EntityData);
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub struct BucketEntityDataImpl;
+/// The entity saved in a mob bucket (`CustomData`, a compound). `None` is the
+/// vanilla default, an empty compound.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BucketEntityDataImpl {
+    pub nbt: Option<NbtCompound>,
+}
 impl BucketEntityDataImpl {
-    pub const fn read_data(_data: &NbtTag) -> Option<Self> {
-        Some(Self)
+    #[must_use]
+    pub fn read_data(data: &NbtTag) -> Option<Self> {
+        Some(Self {
+            nbt: Some(data.extract_compound()?.clone()),
+        })
+    }
+
+    /// The stored compound, empty when none was set.
+    #[must_use]
+    pub fn to_nbt(&self) -> NbtCompound {
+        self.nbt.clone().unwrap_or_default()
     }
 }
 impl DataComponentImpl for BucketEntityDataImpl {
-    default_impl!(BucketEntityData);
+    fn write_data(&self) -> NbtTag {
+        NbtTag::Compound(self.to_nbt())
+    }
+    fn equal(&self, other: &dyn DataComponentImpl) -> bool {
+        other
+            .as_any()
+            .downcast_ref::<Self>()
+            .is_some_and(|other| self.to_nbt() == other.to_nbt())
+    }
+    #[inline]
+    fn get_enum() -> crate::data_component::DataComponent
+    where
+        Self: Sized,
+    {
+        crate::data_component::DataComponent::BucketEntityData
+    }
+    fn get_self_enum(&self) -> crate::data_component::DataComponent {
+        crate::data_component::DataComponent::BucketEntityData
+    }
+    fn to_dyn(self) -> Box<dyn DataComponentImpl> {
+        Box::new(self)
+    }
+    fn clone_dyn(&self) -> Box<dyn DataComponentImpl> {
+        Box::new(self.clone())
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    fn as_mut_any(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
 
 #[derive(Clone)]

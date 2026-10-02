@@ -110,14 +110,35 @@ impl DataComponentImpl for WrittenBookContentImpl {
     default_impl!(WrittenBookContent);
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub struct DebugStickStateImpl;
+/// `minecraft:debug_stick_state` is not network-synchronized in vanilla, so it travels as the NBT of
+/// its persistent codec. The tag is kept as read; `None` is the vanilla default
+/// (an empty compound).
+#[derive(Clone, Debug, PartialEq)]
+pub struct DebugStickStateImpl {
+    pub state: Option<NbtTag>,
+}
 impl DebugStickStateImpl {
-    pub const fn read_data(_data: &NbtTag) -> Option<Self> {
-        Some(Self)
+    #[must_use]
+    pub fn read_data(data: &NbtTag) -> Option<Self> {
+        Some(Self {
+            // Older Pumpkin builds saved this component as an end tag.
+            state: (!matches!(data, NbtTag::End)).then(|| data.clone()),
+        })
+    }
+
+    /// The persistent (NBT) form of this component, used both for saving and
+    /// on the network.
+    #[must_use]
+    pub fn to_nbt(&self) -> NbtTag {
+        self.state
+            .clone()
+            .unwrap_or_else(|| NbtTag::Compound(NbtCompound::new()))
     }
 }
 impl DataComponentImpl for DebugStickStateImpl {
+    fn write_data(&self) -> NbtTag {
+        self.to_nbt()
+    }
     default_impl!(DebugStickState);
 }
 

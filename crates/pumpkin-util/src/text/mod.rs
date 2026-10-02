@@ -899,9 +899,23 @@ impl TextComponentBase {
 }
 
 fn nbt_compound_to_json(compound: &pumpkin_nbt::NbtCompound) -> serde_json::Value {
+    // NBT has no boolean type, so vanilla writes these style flags as bytes.
+    const BOOLEAN_STYLE_KEYS: [&str; 5] = [
+        "bold",
+        "italic",
+        "underlined",
+        "strikethrough",
+        "obfuscated",
+    ];
     let mut map = serde_json::Map::new();
     for (k, v) in &compound.child_tags {
-        map.insert(k.to_string(), nbt_tag_to_json(v));
+        let value = match v {
+            pumpkin_nbt::tag::NbtTag::Byte(b) if BOOLEAN_STYLE_KEYS.contains(&k.as_ref()) => {
+                serde_json::Value::Bool(*b != 0)
+            }
+            _ => nbt_tag_to_json(v),
+        };
+        map.insert(k.to_string(), value);
     }
     serde_json::Value::Object(map)
 }

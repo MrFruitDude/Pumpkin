@@ -832,7 +832,9 @@ impl ItemStack {
         // Try to get item by registry key
         let item = Item::from_registry_key(registry_key)?;
 
-        let count = compound.get_int("count")? as u8;
+        // Vanilla omits `count` when it is 1 (e.g. in charged projectiles and
+        // container contents).
+        let count = compound.get_int("count").unwrap_or(1) as u8;
 
         // Create the item stack
         let mut item_stack = Self::new(count, item);
@@ -841,12 +843,28 @@ impl ItemStack {
         if let Some(tag) = compound.get_compound("components") {
             for (name, data) in &tag.child_tags {
                 if let Some(name) = name.strip_prefix("!") {
-                    item_stack
-                        .patch
-                        .push((DataComponent::try_from_name(name)?, None));
+                    let id = DataComponent::try_from_name(name)?;
+                    // Like vanilla's PatchedDataComponentMap, removing a component
+                    // the item does not have by default is a no-op.
+                    if item
+                        .components
+                        .iter()
+                        .any(|(default_id, _)| *default_id == id)
+                    {
+                        item_stack.patch.push((id, None));
+                    }
                 } else {
                     let id = DataComponent::try_from_name(name)?;
-                    item_stack.patch.push((id, Some(read_data(id, data)?)));
+                    let data = read_data(id, data)?;
+                    // Like vanilla, a value equal to the item's default is not part
+                    // of the patch, so it is never sent or saved as an override.
+                    let is_default = item
+                        .components
+                        .iter()
+                        .any(|(default_id, default)| *default_id == id && default.equal(&*data));
+                    if !is_default {
+                        item_stack.patch.push((id, Some(data)));
+                    }
                 }
             }
         }
