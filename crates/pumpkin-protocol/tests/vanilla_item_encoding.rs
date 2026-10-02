@@ -197,25 +197,31 @@ fn item_stacks_encode_like_vanilla() {
             continue;
         }
 
-        // The plain form a container packet uses: with a single component (or
-        // none) the bytes must match vanilla's exactly.
+        // The plain form a container packet uses. With at most one component it
+        // is the stack header, the component id and the component's bytes, so it
+        // must match vanilla's, comparing the component the same way as above
+        // (Pumpkin builds NBT compounds in hash order on every write).
         let mut plain = Vec::new();
         serializer
             .write_with_version(&mut plain, &JavaMinecraftVersion::V_26_3)
             .expect("the length-prefixed form already wrote");
-        let single_ordered_value = ours
-            .added
-            .values()
-            .zip(vanilla.added.values())
-            .all(|(a, b)| a == b);
-        if ours.added.len() + ours.removed.len() <= 1
-            && single_ordered_value
-            && bytes_to_hex(&plain) != vanilla_hex
-        {
-            failures.push(format!(
-                "{spec}\n    vanilla: {vanilla_hex}\n    pumpkin: {}",
-                bytes_to_hex(&plain)
-            ));
+        if ours.added.len() + ours.removed.len() <= 1 {
+            let vanilla_plain = hex_to_bytes(vanilla_hex);
+            let matches = match vanilla.added.iter().next() {
+                None => plain == vanilla_plain,
+                Some((id, payload)) => {
+                    let header = vanilla_plain.len() - payload.len() / 2;
+                    plain.len() >= header
+                        && plain[..header] == vanilla_plain[..header]
+                        && same_component(*id, &bytes_to_hex(&plain[header..]), payload)
+                }
+            };
+            if !matches {
+                failures.push(format!(
+                    "{spec}\n    vanilla: {vanilla_hex}\n    pumpkin: {}",
+                    bytes_to_hex(&plain)
+                ));
+            }
         }
     }
     assert!(checked > 100, "fixture looks truncated: {checked} rows");
