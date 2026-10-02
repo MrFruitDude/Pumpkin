@@ -32,6 +32,7 @@ macro_rules! impl_block_entity_for_chest {
                     viewers: $crate::block::viewer::ViewerCountTracker::new(),
                     loot_table: StdMutex::new(loot_table_key),
                     loot_table_seed,
+                    custom_name: nbt.get("CustomName").cloned(),
                 };
 
                 // Only read saved items when there is no pending loot table.
@@ -55,6 +56,10 @@ macro_rules! impl_block_entity_for_chest {
 
             fn write_nbt(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
                 use pumpkin_inventory::Inventory;
+
+                if let Some(custom_name) = &self.custom_name {
+                    nbt.put("CustomName", custom_name.clone());
+                }
 
                 let loot_table_key = {
                     let guard = self
@@ -319,6 +324,7 @@ macro_rules! impl_chest_helper_methods {
                     viewers: $crate::block::viewer::ViewerCountTracker::new(),
                     loot_table: StdMutex::new(None),
                     loot_table_seed: 0,
+                    custom_name: None,
                 }
             }
 

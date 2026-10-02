@@ -107,6 +107,8 @@ missing_errors_doc = "allow"
 module_name_repetitions = "allow"
 struct_excessive_bools = "allow"
 unused_async_trait_impl = "allow"
+# New in clippy 1.99 (pedantic); `assert!(x.is_empty())` is clearer than its suggested rewrite.
+assert_is_empty = "allow"
 
 [workspace.package]
 version = "0.2.0+26.3-26.51"

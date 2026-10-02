@@ -21,6 +21,8 @@ pub struct TrappedChestBlockEntity {
     pub loot_table: StdMutex<Option<String>>,
     /// Seed used for deterministic loot generation.
     pub loot_table_seed: i64,
+    /// The `CustomName` text component, kept as stored so it is written back unchanged.
+    pub custom_name: Option<pumpkin_nbt::tag::NbtTag>,
 }
 
 impl TrappedChestBlockEntity {

@@ -449,7 +449,7 @@ mod test {
     use super::{BlockEntity, block_entity_from_nbt, furnace::FurnaceBlockEntity};
     use pumpkin_data::{item::Item, item_stack::ItemStack};
     use pumpkin_inventory::Inventory;
-    use pumpkin_nbt::compound::NbtCompound;
+    use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
     use pumpkin_util::math::position::BlockPos;
     use std::sync::Arc;
 
@@ -476,5 +476,83 @@ mod test {
             assert_eq!(stack.get_item().id, Item::DIAMOND.id);
             assert_eq!(stack.item_count, 5);
         }
+    }
+
+    // keepPacked is added by vanilla's chunk serializer, not the block entity,
+    // and reads as false when missing. An empty components compound is the
+    // same as none. A furnace's speed_multiplier is reset from the fuel each time
+    // fuel is consumed; Pumpkin has no fuel speed multipliers yet.
+    fn normalize_compound(compound: &NbtCompound) -> NbtCompound {
+        NbtCompound {
+            child_tags: compound
+                .child_tags
+                .iter()
+                .filter(|(key, value)| {
+                    !(matches!(key.as_ref(), "keepPacked" | "speed_multiplier")
+                        || key.as_ref() == "components"
+                            && matches!(value, NbtTag::Compound(c) if c.is_empty()))
+                })
+                .map(|(key, value)| (key.clone(), normalize(value)))
+                .collect(),
+        }
+    }
+    fn normalize(tag: &NbtTag) -> NbtTag {
+        match tag {
+            NbtTag::Compound(compound) => NbtTag::Compound(normalize_compound(compound)),
+            NbtTag::List(list) => NbtTag::List(list.iter().map(normalize).collect()),
+            other => other.clone(),
+        }
+    }
+
+    /// Chest, furnace and sign from a world saved by the vanilla 26.3 server. Waking
+    /// them up and writing them back, which is what a chunk save does, must give
+    /// the vanilla NBT back.
+    #[tokio::test]
+    async fn vanilla_26_3_block_entities_survive_a_chunk_round_trip() {
+        use std::io::Read;
+
+        let mut bytes = Vec::new();
+        flate2::read::GzDecoder::new(
+            &include_bytes!("../../../../../assets/tests/vanilla_26_3/chunk_6_-3.nbt.gz")[..],
+        )
+        .read_to_end(&mut bytes)
+        .unwrap();
+        let mut cursor = std::io::Cursor::new(&bytes[..]);
+        let chunk = pumpkin_nbt::Nbt::read(&mut pumpkin_nbt::deserializer::NbtReadHelperJava::new(
+            &mut cursor,
+        ))
+        .unwrap()
+        .root_tag;
+
+        let mut checked = Vec::new();
+        let mut lost = Vec::new();
+        for tag in chunk.get_list("block_entities").unwrap() {
+            let NbtTag::Compound(vanilla) = tag else {
+                continue;
+            };
+            let id = vanilla.get_string("id").unwrap();
+            if !matches!(
+                id,
+                "minecraft:chest" | "minecraft:furnace" | "minecraft:sign"
+            ) {
+                continue;
+            }
+            let entity = block_entity_from_nbt(vanilla).expect("vanilla block entity loads");
+            let mut saved = NbtCompound::new();
+            entity.write_internal(&mut saved);
+            let (vanilla, saved) = (normalize_compound(vanilla), normalize_compound(&saved));
+            for (key, value) in &vanilla.child_tags {
+                if saved.get(key) != Some(value) {
+                    lost.push(format!("{id} {key}: {value:?} became {:?}", saved.get(key)));
+                }
+            }
+            checked.push(id);
+        }
+        assert!(lost.is_empty(), "lost on save:\n{}", lost.join("\n"));
+        checked.sort_unstable();
+        assert_eq!(
+            checked,
+            ["minecraft:chest", "minecraft:furnace", "minecraft:sign"]
+        );
     }
 }
