@@ -749,7 +749,8 @@ impl EntityBase for ArrowEntity {
         }
 
         // Entity collisions
-        let candidates = world.get_entities_at_box(&search_box);
+        // Players are kept apart from `entities`; vanilla `ProjectileUtil` hits both.
+        let candidates = world.get_all_at_box(&search_box);
         for cand in candidates {
             if self.should_skip_collision(entity, &cand) {
                 continue;
@@ -919,14 +920,31 @@ impl EntityBase for ArrowEntity {
 
                 let owner_entity = owner_id.and_then(|id| world.get_entity_by_id(id));
 
+                // Vanilla `damageSources().arrow(this, owner)`: the arrow is the direct
+                // entity (its position is what a shield measures against) and the shooter
+                // is the causing entity (kill credit, difficulty scaling).
                 let damage_succeeded = target.damage_with_context(
                     target.as_ref(),
                     damage as f32,
                     DamageType::ARROW,
-                    Some(hit_pos),
-                    owner_entity.as_deref(),
                     None,
+                    Some(self),
+                    owner_entity.as_deref(),
                 );
+
+                if !damage_succeeded && target.get_living_entity().is_some() {
+                    // Vanilla `AbstractArrow.onHitEntity`: a hit that does no damage (a shield,
+                    // invulnerability) deflects the arrow back at a fifth of its speed instead
+                    // of deleting it, so it can still land and be picked up.
+                    let reversed = velocity.multiply(-0.2, -0.2, -0.2);
+                    entity.velocity.store(reversed);
+                    entity.set_rotation(entity.yaw.load() + 180.0, entity.pitch.load());
+                    self.has_hit.store(false, Ordering::SeqCst);
+                    if reversed.length_squared() < 1.0e-7 {
+                        entity.remove();
+                    }
+                    return;
+                }
 
                 if let Some(living) = target.get_living_entity() {
                     if punch > 0 {
@@ -1054,6 +1072,11 @@ impl EntityBase for ArrowEntity {
 impl ArrowEntity {
     fn should_skip_collision(&self, self_ent: &Entity, other: &Arc<dyn EntityBase>) -> bool {
         let other_ent = other.get_entity();
+
+        // Vanilla `Entity.canBeHitByProjectile`: spectators are not pickable.
+        if other.is_spectator() {
+            return true;
+        }
 
         // Don't collide with self
         if other_ent.entity_id == self_ent.entity_id {

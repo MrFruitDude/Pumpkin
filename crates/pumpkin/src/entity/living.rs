@@ -48,7 +48,7 @@ use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::entity::{EntityPose, EntityStatus, EntityType};
 use pumpkin_data::fluid::Fluid;
 use pumpkin_data::game_rules::{GameRule, GameRuleValue};
-use pumpkin_data::item_stack::{DamageResult, ItemStack};
+use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::SoundCategory;
 use pumpkin_data::{Block, Enchantment};
 use pumpkin_data::{damage::DamageType, sound::Sound};
@@ -740,6 +740,34 @@ impl LivingEntity {
             .insert(target_id, now);
     }
 
+    /// Vanilla `BlocksAttacks.hurtBlockingItem`: only a player's shield loses durability,
+    /// `floor(1 + blocked)` once a block reaches 3 damage. The shield is in the hand that is
+    /// using it (`Hand::Left` is the off hand).
+    fn hurt_blocking_shield(&self, caller: &dyn EntityBase, blocked: f32) {
+        let durability = crate::entity::combat::ShieldRules::durability_cost(blocked);
+        if durability <= 0 {
+            return;
+        }
+        let Some(player) = caller.get_player() else {
+            return;
+        };
+        let Some(hand) = *self
+            .active_hand
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        else {
+            return;
+        };
+        let slot = match hand {
+            Hand::Left => EquipmentSlot::OFF_HAND,
+            Hand::Right => EquipmentSlot::MAIN_HAND,
+        };
+        let broke = player.damage_item_in_slot(&slot, durability);
+        if broke && player.inventory.get_stack_in_hand(hand).is_empty() {
+            self.clear_active_hand();
+        }
+    }
+
     pub fn is_blocking(&self) -> bool {
         let item_in_use = self
             .item_in_use
@@ -763,7 +791,7 @@ impl LivingEntity {
                 ) {
                 0
             } else {
-                5
+                crate::entity::combat::ShieldRules::BLOCK_DELAY_TICKS
             };
             return item.get_max_use_time() - use_time >= required_time;
         }
@@ -2819,6 +2847,10 @@ impl LivingEntity {
                 }
             }
         }
+        // Vanilla reads the ARMOR / ARMOR_TOUGHNESS attributes, whose base carries a mob's
+        // natural armor (zombie 2, ...). Item modifiers are counted from the equipment above.
+        armor += self.get_attribute_base(&Attributes::ARMOR) as f32;
+        toughness += self.get_attribute_base(&Attributes::ARMOR_TOUGHNESS) as f32;
 
         let breach_level = attacker
             .and_then(|att| {
@@ -3037,81 +3069,96 @@ impl LivingEntity {
             amount *= 5.0;
         }
 
-        // Check for shield blocking before armor/magic/cooldown
-        if self.is_blocking()
+        // Vanilla `LivingEntity.applyItemBlocking`, before armor/magic/cooldown. The angle is
+        // measured to `DamageSource.getSourcePosition()`: the explicit position if there is
+        // one, else the direct entity's (the melee attacker, or the projectile). Without
+        // either the angle is PI and nothing is blocked.
+        if amount > 0.0
+            && self.is_blocking()
             && !damage_type.has_tag(&tag::DamageType::MINECRAFT_BYPASSES_SHIELD)
-            && let Some(pos) = position
+            && !source.is_some_and(|direct| {
+                direct
+                    .cast_any()
+                    .downcast_ref::<crate::entity::projectile::arrow::ArrowEntity>()
+                    .is_some_and(|arrow| arrow.pierce_level.load(Relaxed) > 0)
+            })
         {
-            let player_pos = self.entity.pos.load();
-            let look_vec = Vector3::rotation_vector(0.0, self.entity.yaw.load() as f64);
-            let mut source_to_player = (player_pos - pos).normalize();
-            source_to_player.y = 0.0;
+            let defender_pos = self.entity.pos.load();
+            let angle = crate::entity::combat::ShieldRules::blocking_angle(
+                defender_pos,
+                self.entity.head_yaw.load(),
+                position.or_else(|| source.map(|direct| direct.get_entity().pos.load())),
+            );
+            let blocked = crate::entity::combat::ShieldRules::blocked_damage(amount, angle);
+            if blocked > 0.0 {
+                self.hurt_blocking_shield(caller, blocked);
 
-            if source_to_player.dot(&look_vec) < 0.0 {
-                world.play_sound(Sound::ItemShieldBlock, SoundCategory::Players, &player_pos);
+                // Vanilla `Player.blockUsingItem`: a melee attacker (never a projectile)
+                // whose weapon disables blocking (axes) puts the shield on cooldown.
+                if !damage_type.has_tag(&tag::DamageType::MINECRAFT_IS_PROJECTILE)
+                    && let Some(attacker) = source
+                    && let Some(attacker_living) = attacker.get_living_entity()
+                    && let Some(player) = caller.get_player()
+                {
+                    let weapon = attacker_living.held_item(attacker);
+                    if weapon.item.has_tag(&tag::Item::MINECRAFT_AXES) {
+                        let ticks = crate::entity::combat::ShieldRules::disable_ticks(
+                            crate::entity::combat::ShieldRules::AXE_DISABLE_SECONDS,
+                        );
+                        player.start_cooldown(Item::SHIELD.registry_key.to_string(), ticks);
+                        self.clear_active_hand();
+                        world.play_sound(
+                            Sound::ItemShieldBreak,
+                            SoundCategory::Players,
+                            &defender_pos,
+                        );
+                    }
+                }
 
                 if let Some(player) = caller.get_player() {
                     player.increment_stat(
                         StatisticCategory::Custom,
                         CustomStatistic::DamageBlockedByShield as i32,
-                        (amount * 10.0).round() as i32,
+                        (blocked * 10.0).round() as i32,
                     );
                 }
 
-                let active_hand = self
-                    .active_hand
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                if let Some(hand) = *active_hand {
-                    let slot = if hand == Hand::Left {
-                        EquipmentSlot::MAIN_HAND
-                    } else {
-                        EquipmentSlot::OFF_HAND
-                    };
-
-                    let durability_damage = (amount / 1.0).floor().max(1.0) as i32;
-                    if let Some(player) = caller.get_player() {
-                        let broke = player.damage_item_in_slot(&slot, durability_damage);
-                        let empty = player
-                            .inventory
-                            .get_stack_in_hand(match &slot {
-                                EquipmentSlot::OffHand(_) => Hand::Left,
-                                _ => Hand::Right,
-                            })
-                            .is_empty();
-                        if broke && empty {
-                            self.clear_active_hand();
-                        }
-                    } else {
-                        let mut equipment_guard = self
-                            .entity_equipment
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner);
-                        if let Some(stack) = equipment_guard.equipment.get_mut(&slot)
-                            && stack.damage_item(durability_damage) == DamageResult::Broken
-                        {
-                            world.send_entity_status(
-                                &self.entity,
-                                crate::entity::equipment_break_status(&slot),
-                                None,
-                            );
-                            *stack = ItemStack::EMPTY.clone();
-                            let broken_stack = stack.clone();
-                            drop(equipment_guard);
-
-                            self.send_equipment_changes(&[(slot, broken_stack)]);
-                            self.clear_active_hand();
-                        }
-                    }
+                amount -= blocked;
+                if amount <= 0.0 {
+                    // Fully blocked: vanilla plays the block sound and reports no hit.
+                    world.play_sound(
+                        Sound::ItemShieldBlock,
+                        SoundCategory::Players,
+                        &defender_pos,
+                    );
+                    return false;
                 }
-
-                return false;
             }
         }
 
-        // Vanilla parity: 1. Armor absorb
+        // These damage types bypass the hurt cooldown and death protection
+        let bypasses_cooldown_protection =
+            damage_type == DamageType::GENERIC_KILL || damage_type == DamageType::OUT_OF_WORLD;
+
+        // Vanilla `LivingEntity.hurtServer`: inside the invulnerability window only the part
+        // of a hit above `lastHurt` lands, and `lastHurt` is the damage BEFORE armor and
+        // enchantments, which `actuallyHurt` then applies to whatever lands.
+        let last_damage = self.last_damage_taken.load();
+        let (raw_damage, full_hit) =
+            if self.hurt_cooldown.load(Relaxed) > 10 && !bypasses_cooldown_protection {
+                if amount <= last_damage {
+                    return false;
+                }
+                (amount - last_damage, false)
+            } else {
+                self.hurt_cooldown.store(20, Relaxed);
+                (amount, true)
+            };
+        self.last_damage_taken.store(amount);
+
+        // Vanilla parity: actuallyHurt — armor absorb, then magic absorb.
         let damage_after_armor =
-            self.get_damage_after_armor_absorb(amount, &damage_type, cause.or(source));
+            self.get_damage_after_armor_absorb(raw_damage, &damage_type, cause.or(source));
 
         let effective_amount = self.get_damage_after_magic_absorb(
             damage_after_armor,
@@ -3119,27 +3166,10 @@ impl LivingEntity {
             caller,
             cause.or(source),
         );
-
-        // These damage types bypass the hurt cooldown and death protection
-        let bypasses_cooldown_protection =
-            damage_type == DamageType::GENERIC_KILL || damage_type == DamageType::OUT_OF_WORLD;
-
-        // Apply hurt cooldown logic
-        let last_damage = self.last_damage_taken.load();
-        let (damage_amount, play_sound) =
-            if self.hurt_cooldown.load(Relaxed) > 10 && !bypasses_cooldown_protection {
-                if effective_amount <= last_damage {
-                    return false;
-                }
-                (effective_amount - last_damage, false)
-            } else {
-                self.hurt_cooldown.store(20, Relaxed);
-                (effective_amount, self.health.load() > effective_amount)
-            };
+        let play_sound = full_hit && self.health.load() > effective_amount;
 
         // Finalize state
-        self.last_damage_taken.store(amount);
-        let damage_amount = damage_amount.max(0.0);
+        let damage_amount = effective_amount.max(0.0);
 
         // Record the source once the hit is confirmed.
         *self
