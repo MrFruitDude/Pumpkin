@@ -100,6 +100,12 @@ do_restore() {
     [ -f "$file" ] || die "backup not found: $1"
 
     # Refuse archives that could write outside the data directory.
+    # BusyBox tar (the runtime image) strips '/' and '../' prefixes while
+    # listing and only warns on stderr, so any listing warning is a refusal too.
+    tar_warnings="$(tar -tzf "$file" 2>&1 > /dev/null)" || die "cannot read $file"
+    if [ -n "$tar_warnings" ]; then
+        die "$file has unsafe member names ($tar_warnings); refusing to restore it"
+    fi
     if tar -tzf "$file" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
         die "$file contains absolute or '..' paths; refusing to restore it"
     fi
