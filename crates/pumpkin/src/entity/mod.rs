@@ -100,7 +100,9 @@ pub mod vehicle;
 pub use lightning::LightningBoltEntity;
 
 pub(crate) mod combat;
-#[cfg(test)]
+// These boot real servers; the x86_64 Android CI emulator running the arm64 test binary
+// cannot bear that and hangs, so they run on every other test platform only.
+#[cfg(all(test, not(target_os = "android")))]
 mod combat_tests;
 pub mod predicate;
 
