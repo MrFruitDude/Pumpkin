@@ -1384,36 +1384,38 @@ impl Player {
         };
         self.last_attacked_ticks.store(0, Ordering::Relaxed);
 
-        // Only reduce attack damage if in cooldown
-        // TODO: Enchantments are reduced in the same way, just without the square.
-        if attack_cooldown_progress < 1.0 {
-            damage_multiplier = attack_cooldown_progress.powi(2).mul_add(0.8, 0.2);
-        }
-
-        // Modify the added damage based on the multiplier.
-        let mut damage = base_damage * damage_multiplier;
-        damage += extra_ench_damage * attack_cooldown_progress;
-
+        // Vanilla `Player.attack`: Strength/Weakness are ATTACK_DAMAGE modifiers, so they are
+        // part of the base damage that the cooldown scale and a critical hit multiply.
+        let mut base = base_damage;
         if let Some(strength) = self
             .living_entity
             .get_effect(&pumpkin_data::effect::StatusEffect::STRENGTH)
         {
-            damage += 3.0 * (f64::from(strength.amplifier) + 1.0);
+            base += 3.0 * (f64::from(strength.amplifier) + 1.0);
         }
         if let Some(weakness) = self
             .living_entity
             .get_effect(&pumpkin_data::effect::StatusEffect::WEAKNESS)
         {
-            damage -= 4.0 * (f64::from(weakness.amplifier) + 1.0);
+            base -= 4.0 * (f64::from(weakness.amplifier) + 1.0);
         }
-        damage = damage.max(0.0);
+        let base = base.max(0.0);
+
+        // `baseDamageScaleFactor` = 0.2 + scale^2 * 0.8; `magicBoost` = scale * enchant bonus.
+        if attack_cooldown_progress < 1.0 {
+            damage_multiplier = attack_cooldown_progress.powi(2).mul_add(0.8, 0.2);
+        }
+        let mut scaled_base = base * damage_multiplier;
+        let magic_boost = extra_ench_damage * attack_cooldown_progress;
 
         let pos = victim_entity.pos.load();
         let attack_type = AttackType::new(self, attack_cooldown_progress as f32);
 
-        if matches!(attack_type, AttackType::Critical) {
-            damage *= 1.5;
+        // A critical hit multiplies the base damage only, never the enchantment bonus.
+        if matches!(attack_type, AttackType::Critical) && victim.get_living_entity().is_some() {
+            scaled_base *= 1.5;
         }
+        let mut damage = scaled_base + magic_boost;
 
         let is_mace_smash = matches!(attack_type, AttackType::MaceSmash);
         if is_mace_smash {
@@ -1530,33 +1532,63 @@ impl Player {
                 AttackType::Sweeping => {
                     combat::spawn_sweep_particle(attacker_entity, &world, &pos);
 
-                    let mut sweep_damage = 1.0;
+                    // Vanilla `Player.doSweepAttack`: 1 + SWEEPING_DAMAGE_RATIO * base damage,
+                    // where Sweeping Edge sets the ratio to level / (level + 1).
+                    let mut sweep_ratio = 0.0f32;
                     if let Some(enchantments) = item_stack.get_data_component::<EnchantmentsImpl>()
                     {
                         for (enchantment, level) in enchantments.enchantment.iter() {
                             if **enchantment == Enchantment::SWEEPING_EDGE {
-                                sweep_damage +=
-                                    damage as f32 * (*level as f32 / (*level as f32 + 1.0));
+                                sweep_ratio = *level as f32 / (*level as f32 + 1.0);
                             }
                         }
                     }
+                    let sweep_damage =
+                        (1.0 + sweep_ratio * scaled_base as f32) * attack_cooldown_progress as f32;
 
+                    // Living entities in the target's box inflated by (1, 0.25, 1) and within
+                    // 3 blocks of the attacker; never items or XP orbs.
+                    let target_box = victim_entity.bounding_box.load();
                     let search_box = BoundingBox::new(
-                        Vector3::new(pos.x - 1.0, pos.y - 0.5, pos.z - 1.0),
-                        Vector3::new(pos.x + 1.0, pos.y + 0.5, pos.z + 1.0),
+                        Vector3::new(
+                            target_box.min.x - 1.0,
+                            target_box.min.y - 0.25,
+                            target_box.min.z - 1.0,
+                        ),
+                        Vector3::new(
+                            target_box.max.x + 1.0,
+                            target_box.max.y + 0.25,
+                            target_box.max.z + 1.0,
+                        ),
                     );
-                    let victims = world.get_all_at_box(&search_box);
-                    for other_victim in victims {
-                        if other_victim.get_entity().entity_id != victim_entity.entity_id
-                            && other_victim.get_entity().entity_id != attacker_entity.entity_id
+                    let attacker_pos = attacker_entity.pos.load();
+                    let yaw = attacker_entity.yaw.load().to_radians();
+                    for other_victim in world.get_all_at_box(&search_box) {
+                        let other = other_victim.get_entity();
+                        if other.entity_id == victim_entity.entity_id
+                            || other.entity_id == attacker_entity.entity_id
+                            || other_victim.get_living_entity().is_none()
+                            || other_victim.is_spectator()
+                            || other.pos.load().squared_distance_to_vec(&attacker_pos) >= 9.0
                         {
-                            other_victim.damage_with_context(
-                                other_victim.as_ref(),
-                                sweep_damage,
-                                DamageType::PLAYER_ATTACK,
-                                None,
-                                Some(self),
-                                Some(self),
+                            continue;
+                        }
+                        if other_victim.damage_with_context(
+                            other_victim.as_ref(),
+                            sweep_damage,
+                            DamageType::PLAYER_ATTACK,
+                            None,
+                            Some(self),
+                            Some(self),
+                        ) && config.knockback
+                        {
+                            let resistance = other_victim.get_living_entity().map_or(0.0, |l| {
+                                l.get_attribute_value(&Attributes::KNOCKBACK_RESISTANCE)
+                            });
+                            other.knockback(
+                                combat::knockback_after_resistance(0.4, resistance),
+                                f64::from(yaw.sin()),
+                                f64::from(-yaw.cos()),
                             );
                         }
                     }
@@ -4377,6 +4409,16 @@ impl Player {
             && damage_type != pumpkin_data::damage::DamageType::OUT_OF_WORLD
         {
             return false;
+        }
+        // Vanilla `Player.hurtServer`: sources that scale with difficulty (mob attacks,
+        // explosions, ...) are rescaled for the world's difficulty; zero damage is no hit.
+        let mut amount = amount;
+        if crate::entity::combat::damage_scales_with_difficulty(&damage_type, cause.or(source)) {
+            let difficulty = self.world().level_info.load().difficulty;
+            amount = crate::entity::combat::scale_damage_for_difficulty(amount, difficulty);
+            if amount == 0.0 {
+                return false;
+            }
         }
         self.living_entity
             .damage_with_context(caller, amount, damage_type, position, source, cause)

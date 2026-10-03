@@ -48,11 +48,26 @@ impl AttackType {
             return Self::Knockback;
         }
 
-        if is_strong && !on_ground && fall_distance > 0.0 {
+        // Vanilla `Player.canCriticalAttack`: falling, airborne, not climbing, not in water,
+        // not blind, not riding, not sprinting (sprinting already returned above).
+        let can_crit = !on_ground
+            && fall_distance > 0.0
+            && !entity
+                .world
+                .load()
+                .get_block(&entity.block_pos.load())
+                .has_tag(&pumpkin_data::tag::Block::MINECRAFT_CLIMBABLE)
+            && !entity.touching_water.load(Ordering::Relaxed)
+            && !player
+                .living_entity
+                .has_effect(&pumpkin_data::effect::StatusEffect::BLINDNESS)
+            && entity.get_vehicle().is_none();
+        if is_strong && can_crit {
             return Self::Critical;
         }
 
-        if sword && is_strong && !is_bedrock {
+        // Vanilla `Player.isSweepAttack` also needs the attacker on the ground.
+        if sword && is_strong && on_ground && !is_bedrock {
             return Self::Sweeping;
         }
 
@@ -169,6 +184,130 @@ impl CombatRules {
         let real_armor = total_magic_armor.clamp(0.0, Self::MAX_ARMOR);
         damage * (1.0 - real_armor / Self::ARMOR_PROTECTION_DIVIDER)
     }
+}
+
+/// The shield's `minecraft:blocks_attacks` component, as vanilla `Items.SHIELD` builds it:
+/// `BlocksAttacks(0.25F, 1.0F, [DamageReduction(90.0F, empty, 0.0F, 1.0F)],
+/// ItemDamageFunction(3.0F, 1.0F, 1.0F), #bypasses_shield, shield_block, shield_break)`.
+///
+/// Pumpkin does not decode that component's fields (`BlocksAttacksImpl` is a marker),
+/// and the shield is the only vanilla item that carries it, so its values live here.
+pub struct ShieldRules;
+
+impl ShieldRules {
+    /// `block_delay_seconds` 0.25 * 20 (vanilla `BlocksAttacks.blockDelayTicks`).
+    pub const BLOCK_DELAY_TICKS: i32 = 5;
+    /// `DamageReduction.horizontal_blocking_angle`, in degrees.
+    pub const HORIZONTAL_BLOCKING_ANGLE: f64 = 90.0;
+    /// `ItemDamageFunction.threshold`: hits below this cost the shield no durability.
+    pub const ITEM_DAMAGE_THRESHOLD: f32 = 3.0;
+    /// Seconds an axe disables a shield (vanilla `Item.Properties.axe` passes 5.0F to
+    /// `Weapon.disableBlockingForSeconds`; every other tool passes 0).
+    pub const AXE_DISABLE_SECONDS: f32 = 5.0;
+
+    /// The angle between the defender's horizontal view and the damage source, as vanilla
+    /// `LivingEntity.applyItemBlocking` computes it: `acos(normalize(source - pos with y=0) . view)`.
+    /// `None` (no source position, e.g. fall or starvation) is `PI`, which never blocks.
+    #[must_use]
+    pub fn blocking_angle(
+        defender_pos: Vector3<f64>,
+        defender_head_yaw: f32,
+        source_pos: Option<Vector3<f64>>,
+    ) -> f64 {
+        let Some(source_pos) = source_pos else {
+            return std::f64::consts::PI;
+        };
+        let view = Vector3::rotation_vector(0.0, f64::from(defender_head_yaw));
+        let to = source_pos - defender_pos;
+        let horizontal = Vector3::new(to.x, 0.0, to.z);
+        // Vanilla `Vec3.normalize` returns ZERO below 1.0E-5 rather than NaN.
+        let len = horizontal.length();
+        let horizontal = if len < 1.0e-5 {
+            Vector3::new(0.0, 0.0, 0.0)
+        } else {
+            horizontal * (1.0 / len)
+        };
+        horizontal.dot(&view).clamp(-1.0, 1.0).acos()
+    }
+
+    /// Damage the shield absorbs (vanilla `BlocksAttacks.resolveBlockedDamage` with the
+    /// shield's single `DamageReduction(90, any type, base 0, factor 1)`): all of it
+    /// inside the blocking angle, none outside.
+    #[must_use]
+    pub fn blocked_damage(dealt: f32, angle: f64) -> f32 {
+        if angle > Self::HORIZONTAL_BLOCKING_ANGLE.to_radians() {
+            0.0
+        } else {
+            dealt.max(0.0)
+        }
+    }
+
+    /// Durability the shield loses for a block (vanilla `ItemDamageFunction.apply`):
+    /// nothing below 3 damage, otherwise `floor(1 + damage)`.
+    #[must_use]
+    pub fn durability_cost(blocked: f32) -> i32 {
+        if blocked < Self::ITEM_DAMAGE_THRESHOLD {
+            0
+        } else {
+            (1.0 + blocked).floor() as i32
+        }
+    }
+
+    /// Cooldown ticks a disabling weapon puts on the shield
+    /// (vanilla `BlocksAttacks.disableBlockingForTicks`, `disable_cooldown_scale` 1.0).
+    #[must_use]
+    pub fn disable_ticks(disable_seconds: f32) -> i32 {
+        if disable_seconds > 0.0 {
+            (disable_seconds * 20.0).round() as i32
+        } else {
+            0
+        }
+    }
+}
+
+/// Vanilla `Player.hurtServer`: damage whose source `scalesWithDifficulty()` is set to 0 on
+/// Peaceful, `min(d / 2 + 1, d)` on Easy, unchanged on Normal and `d * 3 / 2` on Hard.
+#[must_use]
+pub fn scale_damage_for_difficulty(damage: f32, difficulty: pumpkin_util::Difficulty) -> f32 {
+    match difficulty {
+        pumpkin_util::Difficulty::Peaceful => 0.0,
+        pumpkin_util::Difficulty::Easy => (damage / 2.0 + 1.0).min(damage),
+        pumpkin_util::Difficulty::Normal => damage,
+        pumpkin_util::Difficulty::Hard => damage * 3.0 / 2.0,
+    }
+}
+
+/// Vanilla `DamageSource.scalesWithDifficulty`: `NEVER` never scales, `ALWAYS` always does,
+/// and `WHEN_CAUSED_BY_LIVING_NON_PLAYER` only when the causing entity is a non-player mob.
+#[must_use]
+pub fn damage_scales_with_difficulty(
+    damage_type: &pumpkin_data::damage::DamageType,
+    causing_entity: Option<&dyn EntityBase>,
+) -> bool {
+    use pumpkin_data::damage::DamageScaling;
+    match damage_type.scaling {
+        DamageScaling::Never => false,
+        DamageScaling::Always => true,
+        DamageScaling::WhenCausedByLivingNonPlayer => causing_entity
+            .is_some_and(|e| e.get_living_entity().is_some() && e.get_player().is_none()),
+    }
+}
+
+/// Vanilla `AttackRange.isInRange(attacker, aabb, extraBuffer)`: the distance from the
+/// attacker's eyes to the nearest point of the target box must lie in
+/// `[min - margin - buffer, max + margin + buffer]`.
+#[must_use]
+pub fn attack_range_contains(
+    eye_pos: Vector3<f64>,
+    target_box: &pumpkin_util::math::boundingbox::BoundingBox,
+    min_reach: f64,
+    max_reach: f64,
+    hitbox_margin: f64,
+    extra_buffer: f64,
+) -> bool {
+    let distance = target_box.squared_magnitude(eye_pos).sqrt();
+    distance >= min_reach - hitbox_margin - extra_buffer
+        && distance <= max_reach + hitbox_margin + extra_buffer
 }
 
 pub const RESET_DAMAGE_STATUS_TIME: i64 = 100;
@@ -652,5 +791,64 @@ mod tests {
         // Stacked armour modifiers can push resistance above 1.0; the result is
         // negative and callers guard on `strength > 0.0`.
         assert!(knockback_after_resistance(0.4, 1.2) < 0.0);
+    }
+
+    // Vanilla `LivingEntity.applyItemBlocking` + shield `DamageReduction(90, _, 0, 1)`.
+    #[test]
+    fn shield_blocks_inside_ninety_degrees_only() {
+        let at = Vector3::new(0.0, 64.0, 0.0);
+        // Yaw 0 looks toward +Z.
+        let front = ShieldRules::blocking_angle(at, 0.0, Some(Vector3::new(0.0, 64.0, 3.0)));
+        let side = ShieldRules::blocking_angle(at, 0.0, Some(Vector3::new(3.0, 64.0, 0.0)));
+        let behind = ShieldRules::blocking_angle(at, 0.0, Some(Vector3::new(0.0, 64.0, -3.0)));
+        assert!(front.abs() < 1e-9);
+        assert!((side - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
+        assert_eq!(ShieldRules::blocked_damage(6.0, front), 6.0);
+        // Exactly 90 degrees still blocks (`angle > limit` is the miss test).
+        assert_eq!(ShieldRules::blocked_damage(6.0, side), 6.0);
+        assert_eq!(ShieldRules::blocked_damage(6.0, behind), 0.0);
+        // No source position: angle PI, never blocked.
+        let none = ShieldRules::blocking_angle(at, 0.0, None);
+        assert_eq!(ShieldRules::blocked_damage(6.0, none), 0.0);
+    }
+
+    // Vanilla shield `ItemDamageFunction(3, 1, 1)`.
+    #[test]
+    fn shield_durability_follows_item_damage_function() {
+        assert_eq!(ShieldRules::durability_cost(2.9), 0);
+        assert_eq!(ShieldRules::durability_cost(3.0), 4);
+        assert_eq!(ShieldRules::durability_cost(7.5), 8);
+        // Axe: `Weapon(2, 5.0F)` -> 100 ticks with `disable_cooldown_scale` 1.
+        assert_eq!(
+            ShieldRules::disable_ticks(ShieldRules::AXE_DISABLE_SECONDS),
+            100
+        );
+    }
+
+    // Vanilla `Player.hurtServer` difficulty scaling.
+    #[test]
+    fn difficulty_scaling_matches_vanilla() {
+        use pumpkin_util::Difficulty;
+        assert_eq!(scale_damage_for_difficulty(3.0, Difficulty::Peaceful), 0.0);
+        assert_eq!(scale_damage_for_difficulty(3.0, Difficulty::Easy), 2.5);
+        // min(d/2 + 1, d): a 1-damage hit stays 1 on Easy.
+        assert_eq!(scale_damage_for_difficulty(1.0, Difficulty::Easy), 1.0);
+        assert_eq!(scale_damage_for_difficulty(3.0, Difficulty::Normal), 3.0);
+        assert_eq!(scale_damage_for_difficulty(3.0, Difficulty::Hard), 4.5);
+    }
+
+    // Vanilla `AttackRange.isInRange`.
+    #[test]
+    fn attack_range_uses_distance_to_the_box() {
+        let target = pumpkin_util::math::boundingbox::BoundingBox::new(
+            Vector3::new(4.0, 0.0, -0.3),
+            Vector3::new(4.6, 1.8, 0.3),
+        );
+        let eye = Vector3::new(0.0, 1.62, 0.0);
+        // 4 blocks to the box; reach 3 + buffer 3.
+        assert!(attack_range_contains(eye, &target, 0.0, 3.0, 0.0, 3.0));
+        assert!(!attack_range_contains(eye, &target, 0.0, 3.0, 0.0, 0.0));
+        // Spear-style minimum reach.
+        assert!(!attack_range_contains(eye, &target, 5.0, 8.0, 0.0, 0.0));
     }
 }

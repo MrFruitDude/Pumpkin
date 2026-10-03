@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use pumpkin_data::{
     Block, BlockState, BlockStateId,
+    attributes::Attributes,
     damage::DamageType,
     entity::EntityType,
     fluid::Fluid,
@@ -89,18 +90,20 @@ pub trait ExplosionDamageCalculator: Send + Sync {
         entity: &dyn EntityBase,
         exposure: f32,
     ) -> f32 {
-        let radius = explosion.power as f64 * 2.0;
+        // Vanilla `ExplosionDamageCalculator.getEntityDamageAmount`: the factor is
+        // `7 * doubleRadius`, i.e. 14 * power (a point-blank TNT hit deals 57).
+        let double_radius = explosion.power as f64 * 2.0;
         let distance = (entity
             .get_entity()
             .pos
             .load()
             .squared_distance_to_vec(&explosion.pos))
         .sqrt()
-            / radius;
+            / double_radius;
         let damage_multiplier = (1.0 - distance) * exposure as f64;
         (f64::midpoint(damage_multiplier * damage_multiplier, damage_multiplier)
             * 7.0
-            * explosion.power as f64
+            * double_radius
             + 1.0) as f32
     }
 }
@@ -405,10 +408,8 @@ impl Explosion {
                 Self::calculate_exposure(&self.pos, entity, world) as f64
             };
 
-            if exposure == 0.0 {
-                continue;
-            }
-
+            // Vanilla `ServerExplosion.hurtEntities` hurts every entity in range, even one
+            // fully behind cover (exposure 0 still deals the formula's flat 1 damage).
             if should_damage {
                 let damage =
                     calc.get_entity_damage_amount(self, entity_base.as_ref(), exposure as f32);
@@ -423,7 +424,11 @@ impl Explosion {
             };
             let direction = (dir_pos - self.pos).normalize();
 
-            let knockback_power = (1.0 - distance) * exposure * knockback_multiplier;
+            let knockback_resistance = entity_base.get_living_entity().map_or(0.0, |living| {
+                living.get_attribute_value(&Attributes::EXPLOSION_KNOCKBACK_RESISTANCE)
+            });
+            let knockback_power =
+                (1.0 - distance) * exposure * knockback_multiplier * (1.0 - knockback_resistance);
             let knockback = direction * knockback_power;
             // Vanilla `ServerExplosion.hurtEntities`: creative flyers get no knockback.
             if entity_base
