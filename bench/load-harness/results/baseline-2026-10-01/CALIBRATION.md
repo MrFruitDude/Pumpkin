@@ -28,13 +28,13 @@ not a measured difference. Memory is the one gap far outside the noise: Pumpkin 
 - The host is shared and busy. While these runs measured, other processes used about 7 to 9
   cores on average (`Other host CPU`: whole-machine busy time minus the server and the bots,
   from sysinfo; per-process sums from psutil came out lower, so treat it as an upper bound).
-  They were other sessions' workloads (a `bun` process at a constant 100%, the KiroCrew app, Java
-  mod-dev clients and Gradle, Spotlight). With n=3 the correlation between that load and MSPT is
+  They were unrelated workloads (a background process at a constant 100%, desktop apps, Java
+  mod-dev clients and Gradle, file indexing). With n=3 the correlation between that load and MSPT is
   not consistent in sign, so it is not proven to be the only cause.
 - Each run generates a fresh world and the bots' timing is not deterministic, so chunk
   generation and lighting load differs between runs. That mostly shows up in Pumpkin's MSPT
   tail (P95 18 to 24 ms, P99 up to 120 ms), which is where its MSPT spread comes from.
-- An earlier attempt was discarded: a game client from another session bound 127.0.0.1:25599,
+- An earlier attempt was discarded: an unrelated game client bound 127.0.0.1:25599,
   so the bots silently joined it instead of the server under test. The harness now picks a free
   port, checks both the wildcard and loopback address, and requires the server under test to log
   every bot joining.
