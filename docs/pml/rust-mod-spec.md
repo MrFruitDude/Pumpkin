@@ -1,6 +1,6 @@
 # Rust Mod Loader for Pumpkin — Draft Spec (v0.1)
 
-Status: v0.3 — open questions Q1–Q9 decided by the user (§13, 2026-10-02); P0 benchmark done, verdict **NO-GO for per-call sync hooks**, batched path passes ([bench-p0.md](bench-p0.md)); the API is now **batch-first on hot paths** (D9, §4.13); P1 runtime registry layer implemented (§10) · Target: Pumpkin `0.2.0+26.3` (upstream `742beaf`, 2026-09-30), Minecraft Java 26.3 · Author: kirocrew-worker · Date: 2026-10-01, decisions 2026-10-02
+Status: v0.3 — open questions Q1–Q9 decided by the user (§13, 2026-10-02); P0 benchmark done, verdict **NO-GO for per-call sync hooks**, batched path passes ([bench-p0.md](bench-p0.md)); the API is now **batch-first on hot paths** (D9, §4.13); P1 runtime registry layer implemented (§10) · Target: Pumpkin `0.2.0+26.3` (upstream `742beaf`, 2026-09-30), Minecraft Java 26.3 · Author: MrFruitDude · Date: 2026-10-01, decisions 2026-10-02
 
 Working name: **PML** (Pumpkin Mod Loader). Guest crate `pml`, WIT package `pumpkin:mod`, CLI `cargo mod`.
 
